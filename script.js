@@ -15,6 +15,11 @@ class PomodoroTimer {
         this.userEmail = '';
         this.notificationsEnabled = true;
 
+        // Sleep-resistant timer properties
+        this.startTime = null;
+        this.wakeLock = null;
+        this.worker = null;
+
         // Device identification and sync management
         this.deviceId = this.generateDeviceId();
         this.lastSyncTime = null;
@@ -29,6 +34,7 @@ class PomodoroTimer {
         this.updateDisplay();
         this.scheduleDailyReport();
         this.startPeriodicSync();
+        this.initializeSleepResistance();
     }
 
     initializeElements() {
@@ -73,7 +79,6 @@ class PomodoroTimer {
         this.todayTimeDisplay = document.getElementById('todayTime');
         this.sendReportBtn = document.getElementById('sendReportBtn');
         this.syncNowBtn = document.getElementById('syncNowBtn');
-        this.debugSyncBtn = document.getElementById('debugSyncBtn');
         this.activityList = document.getElementById('activityList');
 
         // Sync status elements
@@ -109,7 +114,6 @@ class PomodoroTimer {
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
         this.syncNowBtn.addEventListener('click', () => this.manualSync());
-        this.debugSyncBtn.addEventListener('click', () => this.debugSync());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -146,10 +150,165 @@ class PomodoroTimer {
         setInterval(() => this.saveData(), 30000); // Save every 30 seconds
     }
 
+    async initializeSleepResistance() {
+        // Initialize wake lock API if available
+        if ('wakeLock' in navigator) {
+            console.log('Wake Lock API is supported');
+        } else {
+            console.log('Wake Lock API is not supported');
+        }
+
+        // Initialize Web Worker for background timing
+        this.initializeWorker();
+
+        // Listen for visibility changes to detect when app becomes visible again
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.isRunning) {
+                this.correctTimerAfterWakeup();
+            }
+        });
+
+        // Listen for page focus/blur events
+        window.addEventListener('focus', () => {
+            if (this.isRunning) {
+                this.correctTimerAfterWakeup();
+            }
+        });
+    }
+
+    initializeWorker() {
+        // Create a Web Worker for more reliable background timing
+        const workerCode = `
+            let timerInterval = null;
+            let startTime = null;
+            let duration = 0;
+
+            self.addEventListener('message', function(e) {
+                const { action, data } = e.data;
+
+                if (action === 'start') {
+                    startTime = Date.now();
+                    duration = data.duration * 1000; // Convert to milliseconds
+
+                    timerInterval = setInterval(() => {
+                        const elapsed = Date.now() - startTime;
+                        const remaining = Math.max(0, duration - elapsed);
+
+                        self.postMessage({
+                            type: 'tick',
+                            timeLeft: Math.ceil(remaining / 1000),
+                            elapsed: Math.floor(elapsed / 1000)
+                        });
+
+                        if (remaining <= 0) {
+                            clearInterval(timerInterval);
+                            self.postMessage({ type: 'complete' });
+                        }
+                    }, 1000);
+
+                } else if (action === 'stop') {
+                    if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                    }
+                } else if (action === 'getStatus') {
+                    if (startTime) {
+                        const elapsed = Date.now() - startTime;
+                        const remaining = Math.max(0, duration - elapsed);
+                        self.postMessage({
+                            type: 'status',
+                            timeLeft: Math.ceil(remaining / 1000),
+                            elapsed: Math.floor(elapsed / 1000)
+                        });
+                    }
+                }
+            });
+        `;
+
+        try {
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            this.worker = new Worker(URL.createObjectURL(blob));
+
+            this.worker.addEventListener('message', (e) => {
+                const { type, timeLeft, elapsed } = e.data;
+
+                if (type === 'tick') {
+                    this.timeLeft = timeLeft;
+                    this.updateDisplay();
+                } else if (type === 'complete') {
+                    this.completeSession();
+                } else if (type === 'status') {
+                    // Update timer with corrected time after wake-up
+                    this.timeLeft = timeLeft;
+                    this.updateDisplay();
+                }
+            });
+
+            console.log('Web Worker initialized for background timing');
+        } catch (error) {
+            console.error('Failed to create Web Worker:', error);
+        }
+    }
+
+    async requestWakeLock() {
+        if ('wakeLock' in navigator && this.isRunning) {
+            try {
+                this.wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Screen wake lock acquired');
+
+                this.wakeLock.addEventListener('release', () => {
+                    console.log('Screen wake lock released');
+                });
+            } catch (error) {
+                console.error('Failed to acquire wake lock:', error);
+            }
+        }
+    }
+
+    releaseWakeLock() {
+        if (this.wakeLock) {
+            this.wakeLock.release();
+            this.wakeLock = null;
+            console.log('Wake lock released manually');
+        }
+    }
+
+    correctTimerAfterWakeup() {
+        if (!this.isRunning || !this.startTime) return;
+
+        // Calculate how much time should have passed
+        const now = Date.now();
+        const elapsedMs = now - this.startTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+        // Calculate what the time left should be
+        const correctTimeLeft = Math.max(0, this.currentDuration - elapsedSeconds);
+
+        // If there's a significant difference, correct it
+        const timeDifference = Math.abs(this.timeLeft - correctTimeLeft);
+
+        if (timeDifference > 2) { // More than 2 seconds difference
+            console.log(`Timer correction: was ${this.timeLeft}s, should be ${correctTimeLeft}s`);
+            this.timeLeft = correctTimeLeft;
+
+            // Ask worker for status to sync
+            if (this.worker) {
+                this.worker.postMessage({ action: 'getStatus' });
+            }
+
+            this.updateDisplay();
+
+            // Check if session should be complete
+            if (this.timeLeft <= 0) {
+                this.completeSession();
+            }
+        }
+    }
+
     generateDeviceId() {
         let deviceId = localStorage.getItem('pomodoroDeviceId');
         if (!deviceId) {
-            deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11);
             localStorage.setItem('pomodoroDeviceId', deviceId);
         }
         return deviceId;
@@ -335,12 +494,30 @@ class PomodoroTimer {
         this.startBtn.disabled = true;
         this.pauseBtn.disabled = false;
 
-        this.timer = setInterval(() => {
-            this.timeLeft--;
-            this.updateDisplay();
+        // Record start time for sleep-resistant timing
+        this.startTime = Date.now();
 
-            if (this.timeLeft <= 0) {
-                this.completeSession();
+        // Request wake lock to prevent sleep
+        this.requestWakeLock();
+
+        // Start Web Worker timer for background operation
+        if (this.worker) {
+            this.worker.postMessage({
+                action: 'start',
+                data: { duration: this.timeLeft }
+            });
+        }
+
+        // Fallback timer for browsers without Web Worker support
+        this.timer = setInterval(() => {
+            if (!this.worker) {
+                // Only use fallback if worker is not available
+                this.timeLeft--;
+                this.updateDisplay();
+
+                if (this.timeLeft <= 0) {
+                    this.completeSession();
+                }
             }
         }, 1000);
 
@@ -356,7 +533,21 @@ class PomodoroTimer {
         this.isRunning = false;
         this.startBtn.disabled = false;
         this.pauseBtn.disabled = true;
+
+        // Clear both timers
         clearInterval(this.timer);
+
+        // Stop Web Worker
+        if (this.worker) {
+            this.worker.postMessage({ action: 'stop' });
+        }
+
+        // Release wake lock
+        this.releaseWakeLock();
+
+        // Clear start time
+        this.startTime = null;
+
         this.addActivity('⏸️ Timer paused');
     }
 
@@ -364,7 +555,20 @@ class PomodoroTimer {
         this.isRunning = false;
         this.startBtn.disabled = this.isWorkSession && !this.selectedTaskId;
         this.pauseBtn.disabled = true;
+
+        // Clear both timers
         clearInterval(this.timer);
+
+        // Stop Web Worker
+        if (this.worker) {
+            this.worker.postMessage({ action: 'stop' });
+        }
+
+        // Release wake lock
+        this.releaseWakeLock();
+
+        // Clear start time
+        this.startTime = null;
 
         this.currentDuration = this.isWorkSession ? this.workDuration : this.breakDuration;
         this.timeLeft = this.currentDuration;
@@ -561,7 +765,21 @@ class PomodoroTimer {
 
     completeSession() {
         this.isRunning = false;
+
+        // Clear both timers
         clearInterval(this.timer);
+
+        // Stop Web Worker
+        if (this.worker) {
+            this.worker.postMessage({ action: 'stop' });
+        }
+
+        // Release wake lock
+        this.releaseWakeLock();
+
+        // Clear start time
+        this.startTime = null;
+
         this.alarmSound.play().catch(e => console.log('Audio play failed:', e));
 
         // Show notifications

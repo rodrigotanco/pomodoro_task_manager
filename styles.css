@@ -34,7 +34,13 @@ h1 {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.settings-btn {
+.header-buttons {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.settings-btn, .help-btn {
     background: rgba(255, 255, 255, 0.2);
     color: white;
     border: none;
@@ -43,11 +49,21 @@ h1 {
     cursor: pointer;
     font-size: 1rem;
     transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-block;
 }
 
-.settings-btn:hover {
+.settings-btn:hover, .help-btn:hover {
     background: rgba(255, 255, 255, 0.3);
     transform: translateY(-2px);
+}
+
+.help-btn {
+    background: rgba(76, 175, 80, 0.2);
+}
+
+.help-btn:hover {
+    background: rgba(76, 175, 80, 0.3);
 }
 
 .settings-panel {
@@ -498,6 +514,14 @@ main {
 
     h1 {
         font-size: 2rem;
+    }
+    .header-buttons {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .settings-btn, .help-btn {
+        font-size: 0.9rem;
+        padding: 8px 16px;
     }
 
     .time {

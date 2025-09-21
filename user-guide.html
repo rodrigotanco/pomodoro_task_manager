@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍅 Pomodoro Timer - User Guide</title>
+    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMjAiIGZpbGw9IiNmZjZiNmIiLz4KPHN2ZyB4PSIxNiIgeT0iMTYiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+CjxyZWN0IHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzAwMDAwMCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiI+8J+NhTwvcmVjdD4KPC9zdmc+Cjwvc3ZnPgo=">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 100%);
+            min-height: 100vh;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 20px;
+        }
+
+        .back-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .content {
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section:last-child {
+            margin-bottom: 0;
+        }
+
+        h2 {
+            font-size: 2.2rem;
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #ff6b6b;
+            padding-bottom: 10px;
+        }
+
+        h3 {
+            font-size: 1.6rem;
+            color: #4ecdc4;
+            margin-bottom: 15px;
+            margin-top: 30px;
+        }
+
+        h4 {
+            font-size: 1.3rem;
+            color: #555;
+            margin-bottom: 10px;
+            margin-top: 20px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        .highlight {
+            background: linear-gradient(120deg, #ff6b6b 0%, #4ecdc4 100%);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: bold;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin: 30px 0;
+        }
+
+        .feature-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 12px;
+            border-left: 5px solid #ff6b6b;
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-card h4 {
+            color: #ff6b6b;
+            margin-top: 0;
+        }
+
+        .step-list {
+            counter-reset: step-counter;
+            list-style: none;
+            margin: 20px 0;
+        }
+
+        .step-list li {
+            counter-increment: step-counter;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            position: relative;
+            padding-left: 70px;
+        }
+
+        .step-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 20px;
+            top: 20px;
+            background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .install-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 30px 0;
+        }
+
+        .install-section h3 {
+            color: white;
+        }
+
+        .install-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .install-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        .why-pomodoro {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 30px 0;
+        }
+
+        .why-pomodoro h3 {
+            color: white;
+        }
+
+        .benefits-list {
+            list-style: none;
+            margin: 20px 0;
+        }
+
+        .benefits-list li {
+            margin-bottom: 10px;
+            padding-left: 30px;
+            position: relative;
+        }
+
+        .benefits-list li::before {
+            content: "✅";
+            position: absolute;
+            left: 0;
+            font-size: 1.2rem;
+        }
+
+        .google-sheets-section {
+            background: #f8f9fa;
+            border: 2px solid #667eea;
+            color: #333;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 30px 0;
+            position: relative;
+        }
+
+        .google-sheets-section::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px 15px 0 0;
+        }
+
+        .google-sheets-section h2 {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .google-sheets-section h3 {
+            color: #667eea;
+        }
+
+        .code-block {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .tip {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .faq-item {
+            margin-bottom: 25px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .faq-question {
+            font-weight: bold;
+            color: #ff6b6b;
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+
+        .screenshot-placeholder {
+            background: #e9ecef;
+            border: 2px dashed #adb5bd;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            color: #6c757d;
+        }
+
+        .screenshot {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            margin: 20px auto;
+            display: block;
+        }
+
+        .screenshot-small {
+            max-width: 400px;
+        }
+
+        .screenshot-mobile {
+            max-width: 300px;
+        }
+
+        /* Table of Contents Styles */
+        .toc-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            border-left: 5px solid #ff6b6b;
+        }
+
+        .toc-title {
+            font-size: 1.5rem;
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .toc-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .toc-list li {
+            margin-bottom: 10px;
+        }
+
+        .toc-list a {
+            color: #4ecdc4;
+            text-decoration: none;
+            font-weight: 500;
+            display: block;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .toc-list a:hover {
+            background: #f8f9fa;
+            color: #ff6b6b;
+            transform: translateX(5px);
+        }
+
+        .toc-list .toc-subsection {
+            margin-left: 20px;
+            font-size: 0.9rem;
+        }
+
+        /* Back to Top Button */
+        .back-to-top {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.2rem;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .back-to-top.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .back-to-top:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Section IDs for navigation */
+        .section {
+            scroll-margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .header p {
+                font-size: 1rem;
+            }
+
+            .feature-grid,
+            .install-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .step-list li {
+                padding-left: 60px;
+            }
+
+            .step-list li::before {
+                width: 30px;
+                height: 30px;
+                font-size: 1rem;
+            }
+
+            h2 {
+                font-size: 1.8rem;
+            }
+
+            h3 {
+                font-size: 1.4rem;
+            }
+
+            h4 {
+                font-size: 1.2rem;
+            }
+
+            .screenshot {
+                max-width: 100%;
+            }
+
+            .back-btn {
+                padding: 10px 20px;
+                font-size: 0.9rem;
+            }
+
+            .toc-container {
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+
+            .toc-title {
+                font-size: 1.3rem;
+            }
+
+            .toc-list .toc-subsection {
+                margin-left: 15px;
+            }
+
+            .back-to-top {
+                bottom: 20px;
+                right: 20px;
+                width: 45px;
+                height: 45px;
+                font-size: 1rem;
+            }
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+
+            .header,
+            .install-section,
+            .why-pomodoro,
+            .google-sheets-section {
+                background: white !important;
+                color: black !important;
+            }
+
+            .back-btn {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍅 Pomodoro Timer User Guide</h1>
+            <p>Master your productivity with the complete guide to using the Pomodoro Timer</p>
+            <a href="index.html" class="back-btn">← Back to Timer</a>
+        </div>
+
+        <!-- Table of Contents -->
+        <div class="toc-container">
+            <div class="toc-title">📋 Table of Contents</div>
+            <ul class="toc-list">
+                <li><a href="#why-pomodoro">🧠 Why the Pomodoro Technique Works</a></li>
+                <li><a href="#getting-started">🚀 Getting Started</a></li>
+                <li><a href="#key-features">🔧 Key Features</a>
+                    <ul class="toc-list">
+                        <li class="toc-subsection"><a href="#settings">⚙️ Settings & Customization</a></li>
+                    </ul>
+                </li>
+                <li><a href="#install-pwa">📱 Install as Web App</a></li>
+                <li><a href="#google-sheets">📊 Google Sheets Integration</a></li>
+                <li><a href="#pro-tips">💡 Pro Tips & Best Practices</a></li>
+                <li><a href="#faq">❓ Frequently Asked Questions</a></li>
+                <li><a href="#ready">🎉 Ready to Start</a></li>
+            </ul>
+        </div>
+
+        <div class="content">
+            <div class="section" id="why-pomodoro">
+                <div class="why-pomodoro">
+                    <h2>🧠 Why the Pomodoro Technique Works</h2>
+                    <p>The Pomodoro Technique, developed by Francesco Cirillo in the late 1980s, is a scientifically-backed time management method that breaks work into focused 25-minute intervals. Here's why it's so effective:</p>
+
+                    <h3>Scientific Benefits</h3>
+                    <ul class="benefits-list">
+                        <li><strong>Reduces Mental Fatigue:</strong> Regular breaks prevent cognitive overload and maintain peak performance</li>
+                        <li><strong>Improves Focus:</strong> Short, timed sessions create urgency and eliminate distractions</li>
+                        <li><strong>Builds Momentum:</strong> Completing small tasks creates a sense of accomplishment and motivation</li>
+                        <li><strong>Combats Procrastination:</strong> 25 minutes feels manageable, making it easier to start difficult tasks</li>
+                        <li><strong>Enhances Time Awareness:</strong> You become more conscious of how long tasks actually take</li>
+                        <li><strong>Prevents Burnout:</strong> Mandatory breaks ensure sustainable work patterns</li>
+                    </ul>
+
+                    <div class="tip">
+                        <strong>💡 Pro Tip:</strong> Studies show that the brain can maintain intense focus for about 25 minutes before attention starts to wane. The Pomodoro Technique leverages this natural rhythm!
+                    </div>
+                </div>
+            </div>
+
+            <div class="section" id="getting-started">
+                <h2>🚀 Getting Started</h2>
+
+                <h3>Quick Start Guide</h3>
+                <ol class="step-list">
+                    <li>
+                        <h4>Add Your First Task</h4>
+                        <p>Type a task you want to work on in the "Add a new task..." field and click "Add". Be specific about what you want to accomplish.</p>
+                    </li>
+                    <li>
+                        <h4>Select Your Task</h4>
+                        <p>Click on the task from your list to select it. The selected task will be highlighted and appear as your "Current Task".</p>
+                    </li>
+                    <li>
+                        <h4>Start Your First Pomodoro</h4>
+                        <p>Click the "Start" button to begin a 25-minute focused work session. The timer will count down and show your progress.</p>
+                    </li>
+                    <li>
+                        <h4>Work Focused</h4>
+                        <p>Focus exclusively on your selected task. Avoid checking emails, social media, or other distractions during this time.</p>
+                    </li>
+                    <li>
+                        <h4>Take Your Break</h4>
+                        <p>When the timer completes, you'll get a notification. Take a 5-minute break - stretch, hydrate, or rest your eyes.</p>
+                    </li>
+                    <li>
+                        <h4>Complete or Continue</h4>
+                        <p>After your work session, decide if the task is complete (✅) or if you need another Pomodoro to finish it.</p>
+                    </li>
+                </ol>
+
+                <img src="images/timer-interface.png" alt="Main timer interface showing task selection and timer controls" class="screenshot">
+            </div>
+
+            <div class="section" id="key-features">
+                <h2>🔧 Key Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>⏱️ Customizable Timer</h4>
+                        <p>Adjust work sessions (default 25 min) and break duration (default 5 min) to match your needs and attention span.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📝 Task Management</h4>
+                        <p>Create, organize, and track tasks. Mark them complete when finished or delete them if no longer needed.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📊 Progress Tracking</h4>
+                        <p>View real-time statistics: tasks completed today, work sessions finished, and total focus time achieved.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🔔 Smart Notifications</h4>
+                        <p>Get desktop notifications when sessions complete, even when the browser tab isn't active.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📧 Daily Reports</h4>
+                        <p>Automatically generate and email daily productivity summaries to track your progress over time.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🔄 Data Sync</h4>
+                        <p>Optional Google Sheets integration to backup your data and sync across multiple devices.</p>
+                    </div>
+                </div>
+
+                <h3 id="settings">⚙️ Settings & Customization</h3>
+                <p>Access all configuration options through the Settings panel. Customize timers, set up notifications, configure Google Sheets sync, and more.</p>
+
+                <img src="images/settings-panel.png" alt="Settings panel showing all configuration options" class="screenshot">
+                <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                    Complete settings panel with timer customization, email setup, and Google Sheets integration
+                </p>
+            </div>
+
+            <div class="section" id="install-pwa">
+                <div class="install-section">
+                    <h2>📱 Install as Web App</h2>
+                    <p>Turn the Pomodoro Timer into a native-like app on your device for quick access and better focus!</p>
+
+                    <div class="install-grid">
+                        <div class="install-card">
+                            <h4>📱 Mobile Installation (iOS/Android)</h4>
+                            <ol>
+                                <li>Open the timer in your mobile browser (Safari/Chrome)</li>
+                                <li>Tap the share button (iOS) or menu (Android)</li>
+                                <li>Select "Add to Home Screen"</li>
+                                <li>Choose a name and tap "Add"</li>
+                                <li>The app icon will appear on your home screen</li>
+                            </ol>
+                        </div>
+                        <div class="install-card">
+                            <h4>💻 Desktop Installation (Chrome/Edge)</h4>
+                            <ol>
+                                <li>Open the timer in Chrome or Edge browser</li>
+                                <li>Look for the install icon in the address bar</li>
+                                <li>Click "Install Pomodoro Timer"</li>
+                                <li>The app will open in its own window</li>
+                                <li>Pin to taskbar for quick access</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="tip">
+                        <strong>💡 Benefits of Installing:</strong> Dedicated window, no browser distractions, faster loading, offline capability, and native-like notifications!
+                    </div>
+
+                    <img src="images/active-session.png" alt="Pomodoro timer running during an active work session" class="screenshot">
+                    <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                        Example: Timer running with 24:37 remaining on "Write project proposal" task
+                    </p>
+                </div>
+            </div>
+
+            <div class="section" id="google-sheets">
+                <div class="google-sheets-section">
+                    <h2>📊 Google Sheets Integration Setup</h2>
+                    <p>Automatically sync your productivity data to Google Sheets for backup, analysis, and cross-device access.</p>
+
+                    <h3>Why Use Google Sheets Integration?</h3>
+                    <ul class="benefits-list">
+                        <li>Automatic backup of all your tasks and work sessions</li>
+                        <li>Access your data from any device</li>
+                        <li>Create custom charts and productivity reports</li>
+                        <li>Share progress with team members or accountability partners</li>
+                        <li>Historical data analysis and trend tracking</li>
+                    </ul>
+
+                    <h3>Complete Setup Guide</h3>
+                    <ol class="step-list">
+                        <li>
+                            <h4>Create or Open Your Google Sheet</h4>
+                            <p>Open Google Sheets and create a new spreadsheet where you want to track your Pomodoro data. Name it something like "Pomodoro Tracker".</p>
+                        </li>
+                        <li>
+                            <h4>Access Google Apps Script</h4>
+                            <p>In your Google Sheet, go to <strong>Extensions → Apps Script</strong>. This will open the Google Apps Script editor.</p>
+                        </li>
+                        <li>
+                            <h4>Copy the Script Code</h4>
+                            <p>Go back to the Pomodoro Timer, open Settings (⚙️), and click "📋 Setup Instructions". Click the "Copy Apps Script Code" button to copy the integration code.</p>
+                        </li>
+                        <li>
+                            <h4>Paste and Save the Code</h4>
+                            <p>Delete any existing code in the Apps Script editor, paste the copied code, and save the project. Name it "Pomodoro Sync".</p>
+                        </li>
+                        <li>
+                            <h4>Deploy as Web App</h4>
+                            <p>Click <strong>Deploy → New Deployment</strong>. Choose:</p>
+                            <ul>
+                                <li>Type: <strong>Web app</strong></li>
+                                <li>Execute as: <strong>Me</strong></li>
+                                <li>Who has access: <strong>Anyone</strong></li>
+                            </ul>
+                            <p>Click <strong>Deploy</strong> and authorize the app when prompted.</p>
+                        </li>
+                        <li>
+                            <h4>Copy the Webhook URL</h4>
+                            <p>Copy the web app URL provided after deployment. It should look like: <code>https://script.google.com/macros/s/your-script-id/exec</code></p>
+                        </li>
+                        <li>
+                            <h4>Configure the Pomodoro Timer</h4>
+                            <p>Return to the Pomodoro Timer settings, paste the webhook URL in the "Google Apps Script Webhook URL" field, and save settings.</p>
+                        </li>
+                    </ol>
+
+                    <div class="warning">
+                        <strong>⚠️ Important:</strong> Make sure to set access to "Anyone" in step 5, otherwise the sync won't work. This is safe because the script only accepts data you send from your timer.
+                    </div>
+
+                    <h3>What Gets Synced?</h3>
+                    <p>Your Google Sheet will automatically receive:</p>
+                    <ul class="benefits-list">
+                        <li><strong>Activity Log:</strong> All completed tasks and work sessions with timestamps</li>
+                        <li><strong>Task Sync:</strong> Real-time synchronization of your task list across devices</li>
+                        <li><strong>Settings Backup:</strong> Your timer preferences and configurations</li>
+                    </ul>
+
+                    <img src="images/google-sheets-setup.png" alt="Google Sheets integration setup instructions modal" class="screenshot">
+                    <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                        Complete step-by-step instructions for Google Sheets integration
+                    </p>
+                </div>
+            </div>
+
+            <div class="section" id="pro-tips">
+                <h2>💡 Pro Tips & Best Practices</h2>
+
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>🎯 Task Sizing</h4>
+                        <p>Break large tasks into smaller chunks that can be completed in 1-4 Pomodoros. This makes progress more visible and manageable.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🚫 Distraction Management</h4>
+                        <p>Keep a "distraction list" nearby. When something pops into your mind during a Pomodoro, write it down to address later rather than breaking focus.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📊 Track Interruptions</h4>
+                        <p>If you get interrupted during a Pomodoro, restart it. This teaches you to protect your focus time and reveals interruption patterns.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🔄 Batch Similar Tasks</h4>
+                        <p>Group similar tasks (emails, calls, research) into dedicated Pomodoros for better mental context switching.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>⚡ Energy Management</h4>
+                        <p>Schedule your most important tasks during your peak energy hours, typically in the morning for most people.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📈 Weekly Reviews</h4>
+                        <p>Review your daily reports weekly to identify productivity patterns and optimize your schedule.</p>
+                    </div>
+                </div>
+
+                <div class="tip">
+                    <strong>💡 The "Two-Minute Rule":</strong> If a task takes less than 2 minutes, do it immediately rather than adding it to your Pomodoro list. This prevents small tasks from cluttering your focused work time.
+                </div>
+            </div>
+
+            <div class="section" id="faq">
+                <h2>❓ Frequently Asked Questions</h2>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Can I pause a Pomodoro session?</div>
+                    <p>Yes! Click the "Pause" button to temporarily stop the timer. However, traditional Pomodoro technique discourages pausing - it's better to restart if you get interrupted.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: What if I finish a task before the 25 minutes are up?</div>
+                    <p>Great! Click "✅ Complete Task" to mark it done, or use the remaining time to review your work, plan the next task, or take an early break.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Can I change the timer duration?</div>
+                    <p>Absolutely! Click the settings button (⚙️) to customize both work session duration (1-60 minutes) and break duration (1-30 minutes) to suit your needs.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Does the timer work offline?</div>
+                    <p>Yes! Once loaded, the timer works completely offline. Your data is saved locally in your browser. Only Google Sheets sync requires internet connection.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: What if I don't get notifications?</div>
+                    <p>Make sure you've allowed notification permissions when prompted. You can also check your browser's notification settings and enable them for this site.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Can I use this on multiple devices?</div>
+                    <p>Yes! Set up Google Sheets integration to sync your tasks and data across all your devices automatically.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Is my data private and secure?</div>
+                    <p>Absolutely! All data is stored locally in your browser by default. Google Sheets integration is optional and only sends data to your own Google Sheet.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: What happens during breaks?</div>
+                    <p>Take a real break! Step away from your screen, stretch, hydrate, or take a short walk. Avoid work-related activities to let your mind recharge.</p>
+                </div>
+            </div>
+
+            <div class="section" id="ready">
+                <h2>🎉 Ready to Boost Your Productivity?</h2>
+                <p>You now have everything you need to master the Pomodoro Technique! Remember, consistency is key - start with just a few Pomodoros per day and gradually build the habit.</p>
+
+                <div class="tip">
+                    <strong>🌟 Challenge:</strong> Try to complete 4 Pomodoros in your first day, then aim to beat that record gradually. Track your progress and celebrate small wins!
+                </div>
+
+                <p style="text-align: center; margin-top: 30px;">
+                    <a href="index.html" class="back-btn" style="font-size: 1.2rem; padding: 15px 30px;">🍅 Start Your First Pomodoro!</a>
+                </p>
+            </div>
+        </div>
+
+        <!-- Back to Top Button -->
+        <button class="back-to-top" id="backToTop" onclick="scrollToTop()">↑</button>
+    </div>
+
+    <script>
+        // Smooth scrolling for table of contents links
+        document.querySelectorAll('.toc-list a').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('href').substring(1);
+                const targetElement = document.getElementById(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Back to top button functionality
+        const backToTopButton = document.getElementById('backToTop');
+
+        function scrollToTop() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        }
+
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            if (window.pageYOffset > 300) {
+                backToTopButton.classList.add('visible');
+            } else {
+                backToTopButton.classList.remove('visible');
+            }
+        });
+
+        // Add scroll indicator for sections
+        function updateActiveSection() {
+            const sections = document.querySelectorAll('.section');
+            const tocLinks = document.querySelectorAll('.toc-list a');
+
+            let currentSection = '';
+            sections.forEach(section => {
+                const rect = section.getBoundingClientRect();
+                if (rect.top <= 100 && rect.bottom >= 100) {
+                    currentSection = section.id;
+                }
+            });
+
+            tocLinks.forEach(link => {
+                link.style.fontWeight = link.getAttribute('href') === '#' + currentSection ? 'bold' : 'normal';
+                link.style.color = link.getAttribute('href') === '#' + currentSection ? '#ff6b6b' : '#4ecdc4';
+            });
+        }
+
+        window.addEventListener('scroll', updateActiveSection);
+        window.addEventListener('load', updateActiveSection);
+    </script>
+</body>
+</html>

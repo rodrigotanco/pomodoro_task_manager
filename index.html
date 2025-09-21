@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍅 Pomodoro Timer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ff6b6b">
+    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMjAiIGZpbGw9IiNmZjZiNmIiLz4KPHN2ZyB4PSIxNiIgeT0iMTYiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+CjxyZWN0IHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzAwMDAwMCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiI+8J+NhTwvcmVjdD4KPC9zdmc+Cjwvc3ZnPgo=">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🍅 Pomodoro Timer</h1>
+            <button id="settingsBtn" class="settings-btn">⚙️ Settings</button>
+        </header>
+
+        <div id="settingsPanel" class="settings-panel hidden">
+            <h3>Settings</h3>
+            <div class="setting-group">
+                <label for="workDuration">Work Duration (minutes):</label>
+                <input type="number" id="workDuration" min="1" max="60" value="25">
+            </div>
+            <div class="setting-group">
+                <label for="breakDuration">Break Duration (minutes):</label>
+                <input type="number" id="breakDuration" min="1" max="30" value="5">
+            </div>
+            <div class="setting-group">
+                <label for="userEmail">Email for Reports:</label>
+                <input type="email" id="userEmail" placeholder="your@email.com">
+            </div>
+            <div class="setting-group">
+                <label>
+                    <input type="checkbox" id="enableNotifications" checked>
+                    Enable Desktop Notifications
+                </label>
+                <small>Get browser notifications when timer completes</small>
+            </div>
+            <div class="setting-group">
+                <label for="googleSheetsWebhook">Google Apps Script Webhook URL (optional):</label>
+                <input type="url" id="googleSheetsWebhook" placeholder="https://script.google.com/macros/s/your-script-id/exec">
+                <small>Deploy the provided Google Apps Script and paste the webhook URL here</small>
+            </div>
+            <div class="setting-group">
+                <button id="setupGoogleSheets" class="btn-secondary">📋 Setup Instructions</button>
+                <!-- <button id="testConnection" class="btn-secondary">🔍 Test Connection</button> -->
+                <small>Setup instructions for Google Sheets integration</small>
+            </div>
+            <button id="saveSettings" class="btn-primary">Save Settings</button>
+        </div>
+
+        <main>
+            <div class="timer-section">
+                <div class="timer-display">
+                    <div id="timeLeft" class="time">25:00</div>
+                    <div id="sessionType" class="session-type">Work Session</div>
+                    <div id="progressBar" class="progress-bar">
+                        <div id="progress" class="progress"></div>
+                    </div>
+                </div>
+
+                <div class="timer-controls">
+                    <button id="startBtn" class="btn-primary" disabled>Start</button>
+                    <button id="pauseBtn" class="btn-secondary" disabled>Pause</button>
+                    <button id="resetBtn" class="btn-secondary">Reset</button>
+                </div>
+
+                <div id="timerActions" class="timer-actions hidden">
+                    <button id="completeTaskBtn" class="btn-complete hidden">✅ Complete Task</button>
+                    <button id="skipBreakBtn" class="btn-skip hidden">⏭️ Skip Break</button>
+                </div>
+
+                <div class="session-info">
+                    <div class="session-counter">
+                        <span>Sessions Completed: </span>
+                        <span id="sessionCount">0</span>
+                    </div>
+                    <div class="current-task">
+                        <span>Current Task: </span>
+                        <span id="currentTaskName">No task selected</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tasks-section">
+                <h2>Tasks</h2>
+                <div class="task-input">
+                    <input type="text" id="taskInput" placeholder="Add a new task...">
+                    <button id="addTaskBtn" class="btn-primary">Add</button>
+                </div>
+                <div id="tasksList" class="tasks-list"></div>
+            </div>
+
+            <div class="stats-section">
+                <h2>Today's Progress</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="todayTasks">0</div>
+                        <div class="stat-label">Tasks Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="todaySessions">0</div>
+                        <div class="stat-label">Work Sessions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="todayTime">0m</div>
+                        <div class="stat-label">Focus Time</div>
+                    </div>
+                </div>
+                <div class="report-actions">
+                    <button id="sendReportBtn" class="btn-secondary">📧 Send Report Now</button>
+                    <button id="syncNowBtn" class="btn-secondary">🔄 Sync Now</button>
+                </div>
+            </div>
+
+            <div class="activity-log">
+                <h3>Recent Activity</h3>
+                <div id="activityList" class="activity-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <audio id="alarmSound" preload="auto">
+        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBTiR1+3MeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvGIeBQ==" type="audio/wav">
+    </audio>
+
+    <!-- Setup Instructions Modal -->
+    <div id="setupModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Google Sheets Setup Instructions</h2>
+                <button id="closeModal" class="close-btn" onclick="window.pomodoroTimer.hideSetupModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setup-steps">
+                    <h3>Step 1: Create/Open Your Google Sheet</h3>
+                    <p>Open the Google Sheet where you want to track your Pomodoro data.</p>
+
+                    <h3>Step 2: Add Apps Script</h3>
+                    <p>In your Google Sheet, go to <strong>Extensions → Apps Script</strong></p>
+
+                    <h3>Step 3: Copy the Script Code</h3>
+                    <button id="copyScriptBtn" class="btn-primary copy-btn">📋 Copy Apps Script Code</button>
+                    <p><small>This will copy the complete Google Apps Script code to your clipboard</small></p>
+
+                    <h3>Step 4: Paste and Save</h3>
+                    <p>• Delete any existing code in the Apps Script editor<br>
+                    • Paste the copied code<br>
+                    • Save the project (name it "Pomodoro Sync")</p>
+
+                    <h3>Step 5: Deploy as Web App</h3>
+                    <p>• Click <strong>Deploy → New Deployment</strong><br>
+                    • Type: <strong>Web app</strong><br>
+                    • Execute as: <strong>Me</strong><br>
+                    • Who has access: <strong>Anyone</strong><br>
+                    • Click <strong>Deploy</strong></p>
+
+                    <h3>Step 6: Copy Webhook URL</h3>
+                    <p>Copy the web app URL and paste it in the webhook field above, then save settings.</p>
+
+                    <div class="success-message">
+                        ✅ Done! Your Pomodoro data will automatically sync to Google Sheets!
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"
+            crossorigin="anonymous"></script>
+    <script src="script.js"></script>
+</body>
+</html>

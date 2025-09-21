@@ -1,0 +1,51 @@
+Create a comprehensive Pomodoro timer webapp that includes:
+
+## 🍅 **Key Features:**
+
+### **Timer Functionality**
+- 25-minute work sessions with 5-minute breaks (customizable)
+- Visual progress bar and session counter
+- Audio alarm when timer finishes
+
+### **Task Management**
+- Add, remove, complete and select tasks
+- Radio button selection for current task
+- Tasks can be finished before spending a complete pomodoro on it, but you need to spend at least 30 seconds.
+- Visual distinction for selected tasks
+
+### **Daily Reporting**
+- Tracks completed tasks and work sessions
+- Automatically schedules email at 11:59 PM each day
+- Manual "Send Report" button available
+- Includes work session details and completion times
+
+### **Data storage**
+- Keep storage locally in the browser so that its possible keep data and that data doesn't gets lost by accident
+
+### **Settings**
+- Customizable work/break durations
+- Email configuration for reports
+- Collapsible settings panel
+
+### **Progress Tracking**
+- Real-time stats for sessions and completed tasks
+- Visual log of completed work
+- Recent activity history
+
+## 📧 **Email Integration:**
+The app automatically opens your default email client at the end of the day with a formatted report containing:
+- ✅ All completed tasks with timestamps
+- 🍅 All work sessions with task names and durations
+- ⏳ Any remaining incomplete tasks
+- Summary statistics
+
+## 🎨 **User Experience:**
+- Clean, modern design with Pomodoro-themed colors
+- Responsive layout for desktop and mobile
+- Clear visual feedback for different states
+- Easy-to-use controls with icons
+
+# Enviroment
+Can run on the browser without the need to have a hosting server
+
+The timer will prevent from starting without selecting a task (except during breaks), and it automatically manages the flow between work sessions and breaks. Just add your email in settings, and you'll receive comprehensive daily reports of your productivity!

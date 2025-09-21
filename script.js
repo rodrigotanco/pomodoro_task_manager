@@ -15,12 +15,20 @@ class PomodoroTimer {
         this.userEmail = '';
         this.notificationsEnabled = true;
 
+        // Device identification and sync management
+        this.deviceId = this.generateDeviceId();
+        this.lastSyncTime = null;
+        this.syncInProgress = false;
+        this.syncTimer = null;
+        this.deletedTaskIds = new Set(); // Track recently deleted/completed task IDs
+
         this.initializeElements();
         this.loadData();
         this.requestNotificationPermission();
         this.bindEvents();
         this.updateDisplay();
         this.scheduleDailyReport();
+        this.startPeriodicSync();
     }
 
     initializeElements() {
@@ -65,7 +73,14 @@ class PomodoroTimer {
         this.todayTimeDisplay = document.getElementById('todayTime');
         this.sendReportBtn = document.getElementById('sendReportBtn');
         this.syncNowBtn = document.getElementById('syncNowBtn');
+        this.debugSyncBtn = document.getElementById('debugSyncBtn');
         this.activityList = document.getElementById('activityList');
+
+        // Sync status elements
+        this.syncStatusIndicator = document.getElementById('syncStatusIndicator');
+        this.syncStatusIcon = document.getElementById('syncStatusIcon');
+        this.syncStatusText = document.getElementById('syncStatusText');
+        this.syncLastTime = document.getElementById('syncLastTime');
 
         // Audio element
         this.alarmSound = document.getElementById('alarmSound');
@@ -93,7 +108,8 @@ class PomodoroTimer {
 
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
-        this.syncNowBtn.addEventListener('click', () => this.syncTodayData());
+        this.syncNowBtn.addEventListener('click', () => this.manualSync());
+        this.debugSyncBtn.addEventListener('click', () => this.debugSync());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -130,11 +146,66 @@ class PomodoroTimer {
         setInterval(() => this.saveData(), 30000); // Save every 30 seconds
     }
 
+    generateDeviceId() {
+        let deviceId = localStorage.getItem('pomodoroDeviceId');
+        if (!deviceId) {
+            deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('pomodoroDeviceId', deviceId);
+        }
+        return deviceId;
+    }
+
+    isTaskCompleted(taskId) {
+        // Check if task is in completed tasks array
+        const isInCompletedTasks = this.completedTasks.some(task => task.id == taskId);
+
+        // Check if task is in recently deleted IDs
+        const isRecentlyDeleted = this.deletedTaskIds.has(taskId);
+
+        return isInCompletedTasks || isRecentlyDeleted;
+    }
+
+    addToDeletedTasks(taskId) {
+        this.deletedTaskIds.add(taskId);
+
+        // Clean up old deleted task IDs (keep only last 24 hours worth)
+        this.cleanupDeletedTasks();
+
+        // Save to localStorage for persistence
+        this.saveDeletedTaskIds();
+    }
+
+    cleanupDeletedTasks() {
+        // For now, keep deleted IDs simple - we can enhance later with timestamps
+        // Limit to 100 recent deletions to prevent memory bloat
+        if (this.deletedTaskIds.size > 100) {
+            const idsArray = Array.from(this.deletedTaskIds);
+            this.deletedTaskIds = new Set(idsArray.slice(-50)); // Keep last 50
+        }
+    }
+
+    saveDeletedTaskIds() {
+        const deletedIds = Array.from(this.deletedTaskIds);
+        localStorage.setItem('pomodoroDeletedTaskIds', JSON.stringify(deletedIds));
+    }
+
+    loadDeletedTaskIds() {
+        const savedDeletedIds = localStorage.getItem('pomodoroDeletedTaskIds');
+        if (savedDeletedIds) {
+            const idsArray = JSON.parse(savedDeletedIds);
+            this.deletedTaskIds = new Set(idsArray);
+        }
+    }
+
     loadData() {
         const savedData = localStorage.getItem('pomodoroData');
         if (savedData) {
             const data = JSON.parse(savedData);
-            this.tasks = data.tasks || [];
+            this.tasks = (data.tasks || []).map(task => ({
+                ...task,
+                lastModified: task.lastModified || task.createdAt || new Date().toISOString(),
+                deviceId: task.deviceId || this.deviceId
+            }));
             this.completedTasks = data.completedTasks || [];
             this.workSessions = data.workSessions || [];
             this.sessionCount = data.sessionCount || 0;
@@ -143,6 +214,7 @@ class PomodoroTimer {
             this.googleSheetsWebhook = data.googleSheetsWebhook || '';
             this.workDuration = data.workDuration || 25 * 60;
             this.breakDuration = data.breakDuration || 5 * 60;
+            this.lastSyncTime = data.lastSyncTime || null;
 
             // Update UI with loaded data
             this.workDurationInput.value = this.workDuration / 60;
@@ -151,6 +223,10 @@ class PomodoroTimer {
             this.enableNotificationsInput.checked = this.notificationsEnabled;
             this.googleSheetsWebhookInput.value = this.googleSheetsWebhook;
         }
+
+        // Load deleted task IDs
+        this.loadDeletedTaskIds();
+
         this.renderTasks();
         this.updateStats();
         this.updateActivityLog();
@@ -167,7 +243,9 @@ class PomodoroTimer {
             googleSheetsWebhook: this.googleSheetsWebhook,
             workDuration: this.workDuration,
             breakDuration: this.breakDuration,
-            lastSave: new Date().toISOString()
+            lastSave: new Date().toISOString(),
+            lastSyncTime: this.lastSyncTime,
+            deviceId: this.deviceId
         };
         localStorage.setItem('pomodoroData', JSON.stringify(data));
     }
@@ -621,11 +699,14 @@ class PomodoroTimer {
         const text = this.taskInput.value.trim();
         if (!text) return;
 
+        const now = new Date().toISOString();
         const task = {
             id: Date.now(),
             text: text,
             completed: false,
-            createdAt: new Date().toISOString()
+            createdAt: now,
+            lastModified: now,
+            deviceId: this.deviceId
         };
 
         this.tasks.push(task);
@@ -633,6 +714,9 @@ class PomodoroTimer {
         this.renderTasks();
         this.saveData();
         this.addActivity(`📝 Added task: ${text}`);
+
+        // Trigger immediate sync for new task
+        this.syncTaskToServer(task);
     }
 
     selectTask(taskId) {
@@ -665,17 +749,24 @@ class PomodoroTimer {
         const taskIndex = this.tasks.findIndex(t => t.id === taskId);
         if (taskIndex !== -1) {
             const task = this.tasks[taskIndex];
+            const now = new Date().toISOString();
+
             task.completed = true;
-            task.completedAt = new Date().toISOString();
+            task.completedAt = now;
+            task.lastModified = now;
+            task.deviceId = this.deviceId;
 
             this.completedTasks.push(task);
             this.tasks.splice(taskIndex, 1);
+
+            // Track as deleted/completed to prevent re-adding during sync
+            this.addToDeletedTasks(taskId);
 
             // Create confetti animation
             console.log('Task completed - triggering confetti for:', task.text);
             this.createConfetti();
 
-            // Sync completed task to Google Sheets
+            // Sync completed task to Google Sheets (activity log)
             this.syncToGoogleSheets('Task', task.text)
                 .then(result => {
                     if (result.success) {
@@ -684,6 +775,9 @@ class PomodoroTimer {
                         console.log('Google Sheets sync failed for task:', result.reason);
                     }
                 });
+
+            // Also remove from server tasks (since it's completed and moved to completedTasks)
+            this.deleteTaskFromServer(taskId);
 
             // Clear selection if completed task was selected
             if (this.selectedTaskId === taskId) {
@@ -698,6 +792,20 @@ class PomodoroTimer {
         }
     }
 
+    async deleteTaskFromServer(taskId) {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        const data = {
+            action: 'delete_task',
+            taskId: taskId,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
     deleteTask(taskId, event) {
         event.stopPropagation();
 
@@ -705,6 +813,12 @@ class PomodoroTimer {
         if (taskIndex !== -1) {
             const task = this.tasks[taskIndex];
             this.tasks.splice(taskIndex, 1);
+
+            // Track as deleted to prevent re-adding during sync
+            this.addToDeletedTasks(taskId);
+
+            // Delete from server as well
+            this.deleteTaskFromServer(taskId);
 
             // Clear selection if deleted task was selected
             if (this.selectedTaskId === taskId) {
@@ -1007,6 +1121,388 @@ class PomodoroTimer {
         });
     }
 
+    // Enhanced sync methods for task synchronization
+    async syncTaskToServer(task) {
+        if (!this.googleSheetsWebhook) {
+            console.log('No Google Sheets webhook configured for task sync');
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        console.log('Syncing single task via POST:', task.text);
+
+        const data = {
+            action: 'sync_tasks',
+            tasks: [task],
+            deviceId: this.deviceId
+        };
+
+        try {
+            const result = await this.performApiCall(data);
+            console.log('POST sync successful for single task:', result);
+            return result;
+        } catch (error) {
+            console.log('POST failed for single task sync, trying JSONP fallback:', error.message);
+            console.log('Switching to JSONP for task:', task.text);
+            const result = await this.syncTaskViaJSONP(task);
+            console.log('JSONP fallback result for single task:', result);
+            return result;
+        }
+    }
+
+    async syncAllTasksToServer() {
+        if (!this.googleSheetsWebhook || this.tasks.length === 0) {
+            return { success: false, reason: 'No webhook configured or no tasks to sync' };
+        }
+
+        console.log('Attempting to sync', this.tasks.length, 'tasks via POST...');
+
+        const data = {
+            action: 'sync_tasks',
+            tasks: this.tasks,
+            deviceId: this.deviceId
+        };
+
+        try {
+            const result = await this.performApiCall(data);
+            console.log('POST sync successful:', result);
+            return result;
+        } catch (error) {
+            console.log('POST failed for all tasks sync, trying JSONP fallback:', error.message);
+            console.log('Switching to JSONP for', this.tasks.length, 'tasks...');
+
+            // For JSONP, sync tasks one by one due to URL length limits
+            let syncedCount = 0;
+            let errors = 0;
+
+            for (const task of this.tasks) {
+                try {
+                    console.log('Syncing task via JSONP:', task.text);
+                    const result = await this.syncTaskViaJSONP(task);
+                    if (result.success) {
+                        syncedCount++;
+                        console.log('✅ JSONP sync success for:', task.text);
+                    } else {
+                        errors++;
+                        console.log('❌ JSONP sync failed for:', task.text, result.reason);
+                    }
+                } catch (taskError) {
+                    errors++;
+                    console.log('❌ JSONP sync error for:', task.text, taskError.message);
+                }
+            }
+
+            const result = {
+                success: errors === 0,
+                syncedCount,
+                errors,
+                reason: errors > 0 ? `${errors} tasks failed to sync` : `Synced via JSONP fallback`
+            };
+
+            console.log('JSONP fallback result:', result);
+            return result;
+        }
+    }
+
+    async getTasksFromServer() {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        const data = {
+            action: 'get_tasks',
+            deviceId: this.deviceId
+        };
+
+        try {
+            // Try fetch first, fallback to JSONP
+            const response = await fetch(this.googleSheetsWebhook, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            });
+
+            const resultText = await response.text();
+            const result = JSON.parse(resultText);
+
+            if (result.success) {
+                return { success: true, tasks: result.tasks || [] };
+            } else {
+                return { success: false, reason: result.error || 'Unknown error' };
+            }
+        } catch (error) {
+            console.log('Fetch failed, trying JSONP fallback for get_tasks:', error.message);
+            return await this.getTasksViaJSONP();
+        }
+    }
+
+    async performApiCall(data) {
+        const response = await fetch(this.googleSheetsWebhook, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        });
+
+        const resultText = await response.text();
+        const result = JSON.parse(resultText);
+
+        if (result.success) {
+            console.log('Task sync successful:', result);
+            return { success: true, data: result };
+        } else {
+            console.error('Task sync failed:', result);
+            return { success: false, reason: result.error || 'Unknown error' };
+        }
+    }
+
+    async syncTaskViaJSONP(task) {
+        return new Promise((resolve) => {
+            const callbackName = 'pomodoroSyncTask_' + Date.now();
+            const script = document.createElement('script');
+            const params = new URLSearchParams({
+                action: 'sync_tasks',
+                taskId: task.id,
+                taskText: task.text,
+                taskCompleted: task.completed ? 'true' : 'false',
+                taskCreatedAt: task.createdAt,
+                taskLastModified: task.lastModified,
+                taskDeviceId: task.deviceId,
+                deviceId: this.deviceId,
+                callback: callbackName
+            });
+
+            script.src = this.googleSheetsWebhook + '?' + params.toString();
+
+            window[callbackName] = (response) => {
+                document.head.removeChild(script);
+                delete window[callbackName];
+
+                if (response.success) {
+                    resolve({ success: true, data: response });
+                } else {
+                    resolve({ success: false, reason: response.error || 'Unknown error' });
+                }
+            };
+
+            script.onerror = () => {
+                document.head.removeChild(script);
+                delete window[callbackName];
+                resolve({ success: false, reason: 'Network error' });
+            };
+
+            document.head.appendChild(script);
+
+            setTimeout(() => {
+                if (window[callbackName]) {
+                    document.head.removeChild(script);
+                    delete window[callbackName];
+                    resolve({ success: false, reason: 'Request timeout' });
+                }
+            }, 10000);
+        });
+    }
+
+    async getTasksViaJSONP() {
+        return new Promise((resolve) => {
+            const callbackName = 'pomodoroGetTasks_' + Date.now();
+            const script = document.createElement('script');
+            const params = new URLSearchParams({
+                action: 'get_tasks',
+                deviceId: this.deviceId,
+                callback: callbackName
+            });
+
+            script.src = this.googleSheetsWebhook + '?' + params.toString();
+
+            window[callbackName] = (response) => {
+                document.head.removeChild(script);
+                delete window[callbackName];
+
+                if (response.success) {
+                    resolve({ success: true, tasks: response.tasks || [] });
+                } else {
+                    resolve({ success: false, reason: response.error || 'Unknown error' });
+                }
+            };
+
+            script.onerror = () => {
+                document.head.removeChild(script);
+                delete window[callbackName];
+                resolve({ success: false, reason: 'Network error' });
+            };
+
+            document.head.appendChild(script);
+
+            setTimeout(() => {
+                if (window[callbackName]) {
+                    document.head.removeChild(script);
+                    delete window[callbackName];
+                    resolve({ success: false, reason: 'Request timeout' });
+                }
+            }, 10000);
+        });
+    }
+
+    async performFullSync() {
+        if (this.syncInProgress) {
+            console.log('Sync already in progress, skipping');
+            return;
+        }
+
+        this.syncInProgress = true;
+        this.updateSyncStatus('syncing');
+
+        try {
+            // Get tasks from server
+            const serverResult = await this.getTasksFromServer();
+
+            if (serverResult.success) {
+                // Merge tasks with conflict resolution
+                const mergeResult = this.mergeTasks(serverResult.tasks);
+
+                // If there were changes, sync back to server
+                if (mergeResult.hasChanges) {
+                    await this.syncAllTasksToServer();
+                }
+
+                this.lastSyncTime = new Date().toISOString();
+                this.saveData();
+                this.updateSyncStatus('synced');
+
+                console.log('Full sync completed successfully');
+            } else {
+                console.error('Failed to get tasks from server:', serverResult.reason);
+                this.updateSyncStatus('error');
+            }
+        } catch (error) {
+            console.error('Full sync error:', error);
+            this.updateSyncStatus('error');
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    mergeTasks(serverTasks) {
+        let hasChanges = false;
+        const mergedTasks = [...this.tasks];
+        const localTaskIds = new Set(this.tasks.map(t => t.id));
+
+        console.log('Merging tasks. Server tasks:', serverTasks.length, 'Local tasks:', this.tasks.length);
+
+        // Add new tasks from server (with completion validation)
+        for (const serverTask of serverTasks) {
+            const taskId = serverTask.id;
+
+            // Check if task is completed/deleted locally
+            if (this.isTaskCompleted(taskId)) {
+                console.log('⏭️ Skipping server task (already completed locally):', serverTask.text);
+                this.addActivity(`⏭️ Ignored completed task from server: ${serverTask.text}`);
+                continue;
+            }
+
+            if (!localTaskIds.has(taskId)) {
+                // New task from server - add it
+                mergedTasks.push(serverTask);
+                hasChanges = true;
+                console.log('➕ Added new task from server:', serverTask.text);
+                this.addActivity(`🔄 Synced new task from another device: ${serverTask.text}`);
+            } else {
+                // Task exists locally - check for conflicts
+                const localTask = this.tasks.find(t => t.id === taskId);
+                const serverModified = new Date(serverTask.lastModified);
+                const localModified = new Date(localTask.lastModified);
+
+                if (serverModified > localModified) {
+                    // Server version is newer, update local
+                    const index = mergedTasks.findIndex(t => t.id === taskId);
+                    mergedTasks[index] = serverTask;
+                    hasChanges = true;
+                    console.log('🔄 Updated task with server version:', serverTask.text);
+                    this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
+                } else if (serverModified < localModified) {
+                    console.log('📍 Keeping local version (newer):', localTask.text);
+                } else {
+                    console.log('🟰 Tasks in sync:', localTask.text);
+                }
+            }
+        }
+
+        // Remove tasks that were completed on other devices
+        const tasksToRemove = [];
+        for (const localTask of mergedTasks) {
+            const serverTask = serverTasks.find(st => st.id === localTask.id);
+            if (!serverTask && !this.isTaskCompleted(localTask.id)) {
+                // Task exists locally but not on server, and wasn't completed locally
+                // This means it was completed/deleted on another device
+                console.log('🗑️ Task was completed on another device:', localTask.text);
+                tasksToRemove.push(localTask.id);
+                this.addToDeletedTasks(localTask.id);
+                this.addActivity(`✅ Task completed on another device: ${localTask.text}`);
+                hasChanges = true;
+            }
+        }
+
+        // Actually remove the tasks
+        for (const taskId of tasksToRemove) {
+            const index = mergedTasks.findIndex(t => t.id === taskId);
+            if (index !== -1) {
+                mergedTasks.splice(index, 1);
+            }
+        }
+
+        if (hasChanges) {
+            this.tasks = mergedTasks;
+            this.renderTasks();
+            this.updateDisplay();
+            console.log('✅ Task merge completed. Final task count:', this.tasks.length);
+        } else {
+            console.log('📍 No changes needed during merge');
+        }
+
+        return { hasChanges };
+    }
+
+    updateSyncStatus(status) {
+        if (!this.syncStatusIndicator) return;
+
+        // Remove all status classes
+        this.syncStatusIndicator.classList.remove('syncing', 'synced', 'error');
+
+        switch (status) {
+            case 'syncing':
+                this.syncStatusIndicator.classList.add('syncing');
+                this.syncStatusIcon.textContent = '🔄';
+                this.syncStatusText.textContent = 'Syncing...';
+                break;
+            case 'synced':
+                this.syncStatusIndicator.classList.add('synced');
+                this.syncStatusIcon.textContent = '✅';
+                this.syncStatusText.textContent = 'Synced';
+                if (this.lastSyncTime) {
+                    const syncTime = new Date(this.lastSyncTime);
+                    this.syncLastTime.textContent = `Last: ${syncTime.toLocaleTimeString()}`;
+                }
+                break;
+            case 'error':
+                this.syncStatusIndicator.classList.add('error');
+                this.syncStatusIcon.textContent = '❌';
+                this.syncStatusText.textContent = 'Sync failed';
+                break;
+            case 'offline':
+                this.syncStatusIcon.textContent = '⚪';
+                this.syncStatusText.textContent = 'Offline';
+                break;
+            default:
+                this.syncStatusIcon.textContent = '⚪';
+                this.syncStatusText.textContent = 'Ready to sync';
+        }
+
+        console.log('Sync status updated:', status);
+    }
+
     async syncToGoogleSheets(type, description, duration = null) {
         if (!this.googleSheetsWebhook) {
             console.log('No Google Sheets webhook configured');
@@ -1014,6 +1510,7 @@ class PomodoroTimer {
         }
 
         const data = {
+            action: 'log_activity',
             date: new Date().toISOString().split('T')[0],
             type: type,
             description: description,
@@ -1073,188 +1570,10 @@ class PomodoroTimer {
         }
     }
 
-    copyAppsScript() {
-        const appsScriptCode = `// Google Apps Script code for automatic Pomodoro data sync
-// Instructions:
-// 1. Open your Google Sheet
-// 2. Go to Extensions > Apps Script
-// 3. Delete existing code and paste this entire file
-// 4. Save the project (name it "Pomodoro Sync")
-// 5. Deploy as web app (Execute as: Me, Access: Anyone)
-// 6. Copy the web app URL and use it in the Pomodoro timer settings
-
-function doPost(e) {
-  try {
-    // Get the active spreadsheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-
-    // Parse the incoming data
-    const data = JSON.parse(e.postData.contents);
-
-    // Check if headers exist, if not add them
-    if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-      sheet.getRange(1, 1, 1, 5).setValues([
-        ['Date', 'Type', 'Description', 'Duration (min)', 'Completed Time']
-      ]);
-
-      // Format the header row
-      const headerRange = sheet.getRange(1, 1, 1, 5);
-      headerRange.setFontWeight('bold');
-      headerRange.setBackground('#4285f4');
-      headerRange.setFontColor('#ffffff');
-    }
-
-    // Find the next empty row
-    const nextRow = sheet.getLastRow() + 1;
-
-    // Add the data
-    sheet.getRange(nextRow, 1, 1, 5).setValues([[
-      data.date,
-      data.type,
-      data.description,
-      data.duration,
-      data.completedTime
-    ]]);
-
-    // Auto-resize columns for better display
-    sheet.autoResizeColumns(1, 5);
-
-    // Handle JSONP callback if present
-    const callback = e.parameter ? e.parameter.callback : null;
-    const response = {
-      success: true,
-      message: 'Data added successfully',
-      row: nextRow
-    };
-
-    if (callback) {
-      return ContentService
-        .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
-    } else {
-      return ContentService
-        .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-  } catch (error) {
-    // Handle JSONP callback for errors too
-    const callback = e.parameter ? e.parameter.callback : null;
-    const errorResponse = {
-      success: false,
-      error: error.toString()
-    };
-
-    if (callback) {
-      return ContentService
-        .createTextOutput(callback + '(' + JSON.stringify(errorResponse) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
-    } else {
-      return ContentService
-        .createTextOutput(JSON.stringify(errorResponse))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-}
-
-// Handle GET requests with data for JSONP (fallback method)
-function handleJSONPData(e) {
-  try {
-    // Get the active spreadsheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-
-    // Extract data from URL parameters
-    const data = {
-      date: e.parameter.date,
-      type: e.parameter.type,
-      description: e.parameter.description,
-      duration: e.parameter.duration,
-      completedTime: e.parameter.completedTime
-    };
-
-    // Check if headers exist, if not add them
-    if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-      sheet.getRange(1, 1, 1, 5).setValues([
-        ['Date', 'Type', 'Description', 'Duration (min)', 'Completed Time']
-      ]);
-
-      // Format the header row
-      const headerRange = sheet.getRange(1, 1, 1, 5);
-      headerRange.setFontWeight('bold');
-      headerRange.setBackground('#4285f4');
-      headerRange.setFontColor('#ffffff');
-    }
-
-    // Find the next empty row
-    const nextRow = sheet.getLastRow() + 1;
-
-    // Add the data
-    sheet.getRange(nextRow, 1, 1, 5).setValues([[
-      data.date,
-      data.type,
-      data.description,
-      data.duration,
-      data.completedTime
-    ]]);
-
-    // Auto-resize columns for better display
-    sheet.autoResizeColumns(1, 5);
-
-    return {
-      success: true,
-      message: 'Data added successfully via JSONP',
-      row: nextRow
-    };
-
-  } catch (error) {
-    return {
-      success: false,
-      error: error.toString()
-    };
-  }
-}
-
-function doGet(e) {
-  // Check if this is a data submission via GET (JSONP fallback)
-  if (e.parameter.date && e.parameter.type && e.parameter.description) {
-    const result = handleJSONPData(e);
-    const callback = e.parameter.callback;
-
-    if (callback) {
-      return ContentService
-        .createTextOutput(callback + '(' + JSON.stringify(result) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
-    } else {
-      return ContentService
-        .createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  // Handle JSONP callback for status check
-  const callback = e.parameter.callback;
-
-  const response = {
-    status: 'Pomodoro Google Apps Script is running',
-    timestamp: new Date().toISOString()
-  };
-
-  if (callback) {
-    // JSONP response
-    return ContentService
-      .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
-  } else {
-    // Regular JSON response
-    return ContentService
-      .createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
+    copyCodeToClipboard(code) {
         // Copy to clipboard
         if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(appsScriptCode).then(() => {
+            navigator.clipboard.writeText(code).then(() => {
                 // Update button text temporarily
                 const originalText = this.copyScriptBtn.innerHTML;
                 this.copyScriptBtn.innerHTML = '✅ Copied to Clipboard!';
@@ -1268,11 +1587,24 @@ function doGet(e) {
                 this.addActivity('📋 Apps Script code copied to clipboard');
             }).catch(err => {
                 console.error('Failed to copy to clipboard:', err);
-                this.fallbackCopyMethod(appsScriptCode);
+                this.fallbackCopyMethod(code);
             });
         } else {
-            this.fallbackCopyMethod(appsScriptCode);
+            this.fallbackCopyMethod(code);
         }
+    }
+
+    copyAppsScript() {
+        // Try to read the updated file first
+        fetch('./google-apps-script.js')
+            .then(response => response.text())
+            .then(appsScriptCode => {
+                this.copyCodeToClipboard(appsScriptCode);
+            })
+            .catch(error => {
+                console.error('Could not load Google Apps Script file:', error);
+                alert('Could not load the latest Google Apps Script code. Please check the google-apps-script.js file in your project directory.');
+            });
     }
 
     fallbackCopyMethod(text) {
@@ -1338,6 +1670,83 @@ function doGet(e) {
 
         window.open(mailtoLink);
         this.addActivity('📧 Daily report sent' + (this.googleSheetsWebhook ? ' (auto-sync enabled)' : ''));
+    }
+
+    async debugSync() {
+        console.log('🔧 DEBUG SYNC STARTED');
+        console.log('Device ID:', this.deviceId);
+        console.log('Webhook URL:', this.googleSheetsWebhook);
+        console.log('Current tasks:', this.tasks);
+
+        if (!this.googleSheetsWebhook) {
+            alert('❌ No webhook URL configured!\nPlease add your Google Apps Script webhook URL in settings.');
+            return;
+        }
+
+        // Test connection first
+        try {
+            console.log('Testing connection...');
+            const response = await fetch(this.googleSheetsWebhook);
+            const result = await response.text();
+            console.log('Connection test result:', result);
+            this.addActivity('🔧 Connection test: ' + (response.ok ? 'OK' : 'Failed'));
+        } catch (error) {
+            console.error('Connection test failed:', error);
+            this.addActivity('🔧 Connection test failed: ' + error.message);
+        }
+
+        // Test task sync if we have tasks
+        if (this.tasks.length > 0) {
+            console.log('Testing task sync...');
+            const result = await this.syncAllTasksToServer();
+            console.log('Task sync result:', result);
+            this.addActivity('🔧 Task sync test: ' + (result.success ? 'Success' : result.reason));
+        } else {
+            console.log('No tasks to sync');
+            this.addActivity('🔧 No tasks to sync');
+        }
+
+        // Test get tasks
+        console.log('Testing get tasks...');
+        const getResult = await this.getTasksFromServer();
+        console.log('Get tasks result:', getResult);
+        this.addActivity('🔧 Get tasks test: ' + (getResult.success ? `Found ${getResult.tasks?.length || 0} tasks` : getResult.reason));
+
+        // Show current state for debugging
+        console.log('Current deleted task IDs:', Array.from(this.deletedTaskIds));
+        console.log('Current completed tasks:', this.completedTasks.map(t => ({id: t.id, text: t.text})));
+
+        alert('Debug sync completed! Check the console (F12) and activity log for details.');
+
+        // Additional debugging info
+        if (this.deletedTaskIds.size > 0) {
+            console.log('📋 Deleted task IDs being tracked:', Array.from(this.deletedTaskIds));
+        }
+    }
+
+    async manualSync() {
+        if (this.syncInProgress) {
+            console.log('Sync already in progress');
+            return;
+        }
+
+        // Perform both task sync and activity sync
+        await this.performFullSync();
+        await this.syncTodayData();
+    }
+
+    startPeriodicSync() {
+        // Initial sync on app start (after a short delay to let UI load)
+        setTimeout(() => {
+            this.performFullSync();
+        }, 2000);
+
+        // Schedule periodic sync every 60 seconds
+        this.syncTimer = setInterval(() => {
+            if (!this.syncInProgress) {
+                this.performFullSync();
+            }
+        }, 60000);
     }
 
     scheduleDailyReport() {

@@ -686,3 +686,48 @@ main {
         padding: 20px;
     }
 }
+
+/* Sync Status Indicator */
+.sync-status {
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sync-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: #e0e0e0;
+}
+
+#syncStatusIcon {
+    font-size: 1rem;
+    animation: none;
+}
+
+.sync-indicator.syncing #syncStatusIcon {
+    animation: spin 1s linear infinite;
+}
+
+.sync-indicator.synced #syncStatusIcon {
+    color: #4caf50;
+}
+
+.sync-indicator.error #syncStatusIcon {
+    color: #f44336;
+}
+
+.sync-time {
+    font-size: 0.8rem;
+    color: #888;
+    margin-left: auto;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

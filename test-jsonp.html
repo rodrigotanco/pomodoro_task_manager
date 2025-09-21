@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSONP Task Sync Test</title>
+</head>
+<body>
+    <h1>JSONP Task Sync Test</h1>
+
+    <div>
+        <label>Webhook URL:</label><br>
+        <input type="text" id="webhook" style="width: 600px" placeholder="Paste your Google Apps Script webhook URL">
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button onclick="testJSONPTaskSync()">Test JSONP Task Sync</button>
+        <button onclick="testJSONPGetTasks()">Test JSONP Get Tasks</button>
+    </div>
+
+    <div id="log" style="margin-top: 20px; background: #f0f0f0; padding: 10px; font-family: monospace; white-space: pre-wrap;"></div>
+
+    <script>
+        function log(msg) {
+            document.getElementById('log').textContent += new Date().toLocaleTimeString() + ': ' + msg + '\n';
+        }
+
+        function testJSONPTaskSync() {
+            const webhook = document.getElementById('webhook').value;
+            if (!webhook) {
+                log('Please enter webhook URL');
+                return;
+            }
+
+            log('Testing JSONP task sync...');
+
+            const testTask = {
+                id: Date.now(),
+                text: 'JSONP Test Task',
+                completed: false,
+                createdAt: new Date().toISOString(),
+                lastModified: new Date().toISOString(),
+                deviceId: 'test_device_' + Math.random().toString(36).substr(2, 5)
+            };
+
+            const callbackName = 'testCallback_' + Date.now();
+            const params = new URLSearchParams({
+                action: 'sync_tasks',
+                taskId: testTask.id,
+                taskText: testTask.text,
+                taskCompleted: testTask.completed ? 'true' : 'false',
+                taskCreatedAt: testTask.createdAt,
+                taskLastModified: testTask.lastModified,
+                taskDeviceId: testTask.deviceId,
+                deviceId: testTask.deviceId,
+                callback: callbackName
+            });
+
+            const script = document.createElement('script');
+            script.src = webhook + '?' + params.toString();
+
+            log('Sending JSONP request: ' + script.src);
+
+            window[callbackName] = function(response) {
+                log('JSONP response received: ' + JSON.stringify(response));
+                document.head.removeChild(script);
+                delete window[callbackName];
+            };
+
+            script.onerror = function() {
+                log('JSONP request failed');
+                document.head.removeChild(script);
+                delete window[callbackName];
+            };
+
+            document.head.appendChild(script);
+
+            setTimeout(() => {
+                if (window[callbackName]) {
+                    log('JSONP request timeout');
+                    document.head.removeChild(script);
+                    delete window[callbackName];
+                }
+            }, 10000);
+        }
+
+        function testJSONPGetTasks() {
+            const webhook = document.getElementById('webhook').value;
+            if (!webhook) {
+                log('Please enter webhook URL');
+                return;
+            }
+
+            log('Testing JSONP get tasks...');
+
+            const callbackName = 'getCallback_' + Date.now();
+            const params = new URLSearchParams({
+                action: 'get_tasks',
+                deviceId: 'test_device',
+                callback: callbackName
+            });
+
+            const script = document.createElement('script');
+            script.src = webhook + '?' + params.toString();
+
+            log('Sending JSONP request: ' + script.src);
+
+            window[callbackName] = function(response) {
+                log('JSONP response received: ' + JSON.stringify(response));
+                document.head.removeChild(script);
+                delete window[callbackName];
+            };
+
+            script.onerror = function() {
+                log('JSONP request failed');
+                document.head.removeChild(script);
+                delete window[callbackName];
+            };
+
+            document.head.appendChild(script);
+
+            setTimeout(() => {
+                if (window[callbackName]) {
+                    log('JSONP request timeout');
+                    document.head.removeChild(script);
+                    delete window[callbackName];
+                }
+            }, 10000);
+        }
+    </script>
+</body>
+</html>

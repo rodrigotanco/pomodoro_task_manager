@@ -1,4 +1,4 @@
-// Google Apps Script code for automatic Pomodoro data sync
+// Google Apps Script code for automatic Pomodoro data sync with full task synchronization
 // Instructions:
 // 1. Open your Google Sheet
 // 2. Go to Extensions > Apps Script
@@ -7,49 +7,65 @@
 // 5. Deploy as web app (Execute as: Me, Access: Anyone)
 // 6. Copy the web app URL and use it in the Pomodoro timer settings
 
-function doPost(e) {
-  try {
-    // Get the active spreadsheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+// Configuration
+const ACTIVITY_SHEET_NAME = 'Activity Log';
+const TASKS_SHEET_NAME = 'Tasks';
+const SETTINGS_SHEET_NAME = 'Settings';
 
-    // Parse the incoming data
-    const data = JSON.parse(e.postData.contents);
+// Helper functions for sheet management
+function getOrCreateSheet(name, headers = []) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(name);
 
-    // Check if headers exist, if not add them
-    if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-      sheet.getRange(1, 1, 1, 5).setValues([
-        ['Date', 'Type', 'Description', 'Duration (min)', 'Completed Time']
-      ]);
-
-      // Format the header row
-      const headerRange = sheet.getRange(1, 1, 1, 5);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(name);
+    if (headers.length > 0) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      const headerRange = sheet.getRange(1, 1, 1, headers.length);
       headerRange.setFontWeight('bold');
       headerRange.setBackground('#4285f4');
       headerRange.setFontColor('#ffffff');
     }
+  } else if (headers.length > 0 && (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '')) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#4285f4');
+    headerRange.setFontColor('#ffffff');
+  }
 
-    // Find the next empty row
-    const nextRow = sheet.getLastRow() + 1;
+  return sheet;
+}
 
-    // Add the data
-    sheet.getRange(nextRow, 1, 1, 5).setValues([[
-      data.date,
-      data.type,
-      data.description,
-      data.duration,
-      data.completedTime
-    ]]);
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const action = data.action || 'log_activity';
 
-    // Auto-resize columns for better display
-    sheet.autoResizeColumns(1, 5);
+    let response = {};
+
+    switch (action) {
+      case 'log_activity':
+        response = logActivity(data);
+        break;
+      case 'sync_tasks':
+        response = syncTasks(data);
+        break;
+      case 'get_tasks':
+        response = getTasks(data);
+        break;
+      case 'update_task':
+        response = updateTask(data);
+        break;
+      case 'delete_task':
+        response = deleteTask(data);
+        break;
+      default:
+        response = { success: false, error: 'Unknown action: ' + action };
+    }
 
     // Handle JSONP callback if present
     const callback = e.parameter ? e.parameter.callback : null;
-    const response = {
-      success: true,
-      message: 'Data added successfully',
-      row: nextRow
-    };
 
     if (callback) {
       return ContentService
@@ -62,7 +78,6 @@ function doPost(e) {
     }
 
   } catch (error) {
-    // Handle JSONP callback for errors too
     const callback = e.parameter ? e.parameter.callback : null;
     const errorResponse = {
       success: false,
@@ -81,55 +96,256 @@ function doPost(e) {
   }
 }
 
+// Activity logging (original functionality)
+function logActivity(data) {
+  const sheet = getOrCreateSheet(ACTIVITY_SHEET_NAME, [
+    'Date', 'Type', 'Description', 'Duration (min)', 'Completed Time'
+  ]);
+
+  const nextRow = sheet.getLastRow() + 1;
+  sheet.getRange(nextRow, 1, 1, 5).setValues([[
+    data.date,
+    data.type,
+    data.description,
+    data.duration,
+    data.completedTime
+  ]]);
+
+  sheet.autoResizeColumns(1, 5);
+
+  return {
+    success: true,
+    message: 'Activity logged successfully',
+    row: nextRow
+  };
+}
+
+// Task synchronization functions
+function syncTasks(data) {
+  console.log('syncTasks called with data:', JSON.stringify(data));
+
+  const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const tasks = data.tasks || [];
+  const deviceId = data.deviceId || 'unknown';
+  const timestamp = new Date().toISOString();
+
+  console.log('Processing', tasks.length, 'tasks for device:', deviceId);
+
+  let syncedCount = 0;
+  let conflictsCount = 0;
+  const conflicts = [];
+
+  for (const task of tasks) {
+    console.log('Processing task for sync:', task.id, task.text);
+
+    const existingRowIndex = findTaskRow(sheet, task.id);
+
+    if (existingRowIndex === -1) {
+      // New task - add it
+      const nextRow = sheet.getLastRow() + 1;
+      sheet.getRange(nextRow, 1, 1, 8).setValues([[
+        task.id,
+        task.text,
+        task.completed || false,
+        task.createdAt,
+        task.completedAt || '',
+        timestamp,
+        deviceId,
+        'synced'
+      ]]);
+      syncedCount++;
+      console.log('Added new task to sheet:', task.text);
+    } else {
+      // Existing task - check for conflicts
+      const existingData = sheet.getRange(existingRowIndex, 1, 1, 8).getValues()[0];
+      const existingModified = new Date(existingData[5]);
+      const taskModified = new Date(task.lastModified || task.createdAt);
+
+      console.log('Comparing timestamps - Local:', taskModified.toISOString(), 'Server:', existingModified.toISOString());
+
+      if (taskModified > existingModified) {
+        // Update with newer data
+        sheet.getRange(existingRowIndex, 1, 1, 8).setValues([[
+          task.id,
+          task.text,
+          task.completed || false,
+          task.createdAt,
+          task.completedAt || '',
+          timestamp,
+          deviceId,
+          'synced'
+        ]]);
+        syncedCount++;
+        console.log('Updated task with newer data:', task.text);
+      } else if (taskModified < existingModified) {
+        // Conflict detected - existing data is newer
+        conflictsCount++;
+        conflicts.push({
+          taskId: task.id,
+          reason: 'newer_version_exists',
+          serverVersion: existingData[1],
+          clientVersion: task.text
+        });
+        console.log('Conflict detected for task:', task.id);
+      } else {
+        console.log('Task already in sync:', task.text);
+      }
+      // If timestamps are equal, no action needed
+    }
+  }
+
+  const result = {
+    success: true,
+    message: `Synced ${syncedCount} tasks`,
+    syncedCount,
+    conflictsCount,
+    conflicts
+  };
+
+  console.log('syncTasks result:', JSON.stringify(result));
+  return result;
+}
+
+function getTasks(data) {
+  console.log('getTasks called with data:', JSON.stringify(data));
+
+  const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const lastRow = sheet.getLastRow();
+  console.log('Tasks sheet last row:', lastRow);
+
+  if (lastRow <= 1) {
+    console.log('No tasks found in sheet');
+    return { success: true, tasks: [] };
+  }
+
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 8);
+  const values = dataRange.getValues();
+
+  const tasks = values
+    .filter(row => row[0]) // Filter out empty rows
+    .map(row => ({
+      id: row[0],
+      text: row[1],
+      completed: row[2],
+      createdAt: row[3],
+      completedAt: row[4] || null,
+      lastModified: row[5],
+      deviceId: row[6],
+      syncStatus: row[7]
+    }));
+
+  const result = {
+    success: true,
+    tasks: tasks,
+    count: tasks.length
+  };
+
+  console.log('getTasks result:', JSON.stringify(result));
+  return result;
+}
+
+function updateTask(data) {
+  const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const task = data.task;
+  const deviceId = data.deviceId || 'unknown';
+  const timestamp = new Date().toISOString();
+
+  const rowIndex = findTaskRow(sheet, task.id);
+
+  if (rowIndex === -1) {
+    return { success: false, error: 'Task not found' };
+  }
+
+  sheet.getRange(rowIndex, 1, 1, 8).setValues([[
+    task.id,
+    task.text,
+    task.completed || false,
+    task.createdAt,
+    task.completedAt || '',
+    timestamp,
+    deviceId,
+    'synced'
+  ]]);
+
+  return {
+    success: true,
+    message: 'Task updated successfully'
+  };
+}
+
+function deleteTask(data) {
+  console.log('deleteTask called with data:', JSON.stringify(data));
+
+  const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const taskId = data.taskId;
+  const rowIndex = findTaskRow(sheet, taskId);
+
+  if (rowIndex === -1) {
+    console.log('Task not found for deletion:', taskId);
+    // Return success even if task not found (might have been deleted already)
+    return {
+      success: true,
+      message: 'Task already deleted or not found',
+      taskId: taskId,
+      wasFound: false
+    };
+  }
+
+  // Get task details before deletion for confirmation
+  const taskData = sheet.getRange(rowIndex, 1, 1, 8).getValues()[0];
+  const taskText = taskData[1];
+
+  sheet.deleteRow(rowIndex);
+
+  console.log('Task deleted successfully:', taskText);
+
+  return {
+    success: true,
+    message: 'Task deleted successfully',
+    taskId: taskId,
+    taskText: taskText,
+    wasFound: true
+  };
+}
+
+function findTaskRow(sheet, taskId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return -1;
+
+  const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  const ids = idRange.getValues().flat();
+
+  const index = ids.findIndex(id => id == taskId);
+  return index === -1 ? -1 : index + 2; // +2 because array is 0-indexed and we start from row 2
+}
+
 // Handle GET requests with data for JSONP (fallback method)
 function handleJSONPData(e) {
   try {
-    // Get the active spreadsheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const action = e.parameter.action || 'log_activity';
 
-    // Extract data from URL parameters
-    const data = {
-      date: e.parameter.date,
-      type: e.parameter.type,
-      description: e.parameter.description,
-      duration: e.parameter.duration,
-      completedTime: e.parameter.completedTime
-    };
-
-    // Check if headers exist, if not add them
-    if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-      sheet.getRange(1, 1, 1, 5).setValues([
-        ['Date', 'Type', 'Description', 'Duration (min)', 'Completed Time']
-      ]);
-
-      // Format the header row
-      const headerRange = sheet.getRange(1, 1, 1, 5);
-      headerRange.setFontWeight('bold');
-      headerRange.setBackground('#4285f4');
-      headerRange.setFontColor('#ffffff');
+    switch (action) {
+      case 'log_activity':
+        return handleJSONPActivity(e);
+      case 'get_tasks':
+        return handleJSONPGetTasks(e);
+      case 'sync_tasks':
+        return handleJSONPSyncTasks(e);
+      default:
+        return { success: false, error: 'JSONP action not supported: ' + action };
     }
-
-    // Find the next empty row
-    const nextRow = sheet.getLastRow() + 1;
-
-    // Add the data
-    sheet.getRange(nextRow, 1, 1, 5).setValues([[
-      data.date,
-      data.type,
-      data.description,
-      data.duration,
-      data.completedTime
-    ]]);
-
-    // Auto-resize columns for better display
-    sheet.autoResizeColumns(1, 5);
-
-    return {
-      success: true,
-      message: 'Data added successfully via JSONP',
-      row: nextRow
-    };
-
   } catch (error) {
     return {
       success: false,
@@ -138,9 +354,48 @@ function handleJSONPData(e) {
   }
 }
 
+function handleJSONPActivity(e) {
+  const data = {
+    date: e.parameter.date,
+    type: e.parameter.type,
+    description: e.parameter.description,
+    duration: e.parameter.duration,
+    completedTime: e.parameter.completedTime
+  };
+
+  return logActivity(data);
+}
+
+function handleJSONPGetTasks(e) {
+  const data = {
+    deviceId: e.parameter.deviceId || 'unknown'
+  };
+
+  return getTasks(data);
+}
+
+function handleJSONPSyncTasks(e) {
+  // For JSONP, we can only send one task at a time due to URL length limits
+  const task = {
+    id: e.parameter.taskId,
+    text: e.parameter.taskText,
+    completed: e.parameter.taskCompleted === 'true',
+    createdAt: e.parameter.taskCreatedAt,
+    lastModified: e.parameter.taskLastModified,
+    deviceId: e.parameter.taskDeviceId
+  };
+
+  const data = {
+    tasks: [task],
+    deviceId: e.parameter.deviceId || 'unknown'
+  };
+
+  return syncTasks(data);
+}
+
 function doGet(e) {
   // Check if this is a data submission via GET (JSONP fallback)
-  if (e.parameter.date && e.parameter.type && e.parameter.description) {
+  if (e.parameter.action || (e.parameter.date && e.parameter.type && e.parameter.description)) {
     const result = handleJSONPData(e);
     const callback = e.parameter.callback;
 
@@ -159,8 +414,11 @@ function doGet(e) {
   const callback = e.parameter.callback;
 
   const response = {
-    status: 'Pomodoro Google Apps Script is running',
-    timestamp: new Date().toISOString()
+    status: 'Pomodoro Google Apps Script with Task Sync is running',
+    timestamp: new Date().toISOString(),
+    supportedActions: ['log_activity', 'sync_tasks', 'get_tasks', 'update_task', 'delete_task'],
+    jsonpActions: ['log_activity', 'get_tasks', 'sync_tasks'],
+    version: '2.0.0-with-jsonp-task-sync'
   };
 
   if (callback) {

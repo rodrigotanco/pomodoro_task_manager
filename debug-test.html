@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Task Sync Debug Test</title>
+</head>
+<body>
+    <h1>Task Sync Debug Test</h1>
+
+    <div>
+        <label>Webhook URL:</label>
+        <input type="text" id="webhookUrl" style="width: 500px" placeholder="Paste your Google Apps Script webhook URL here">
+        <button onclick="testConnection()">Test Connection</button>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button onclick="testSyncTask()">Test Sync Task</button>
+        <button onclick="testGetTasks()">Test Get Tasks</button>
+    </div>
+
+    <div id="results" style="margin-top: 20px; font-family: monospace; white-space: pre-wrap; background: #f0f0f0; padding: 10px;"></div>
+
+    <script>
+        function log(message) {
+            const results = document.getElementById('results');
+            results.textContent += new Date().toLocaleTimeString() + ': ' + message + '\n';
+        }
+
+        async function testConnection() {
+            const url = document.getElementById('webhookUrl').value;
+            if (!url) {
+                log('Please enter webhook URL');
+                return;
+            }
+
+            try {
+                log('Testing connection to: ' + url);
+                const response = await fetch(url);
+                const result = await response.text();
+                log('Connection test result: ' + result);
+            } catch (error) {
+                log('Connection test failed: ' + error.message);
+            }
+        }
+
+        async function testSyncTask() {
+            const url = document.getElementById('webhookUrl').value;
+            if (!url) {
+                log('Please enter webhook URL');
+                return;
+            }
+
+            const testTask = {
+                id: Date.now(),
+                text: 'Debug Test Task',
+                completed: false,
+                createdAt: new Date().toISOString(),
+                lastModified: new Date().toISOString(),
+                deviceId: 'debug_device_' + Math.random().toString(36).substr(2, 9)
+            };
+
+            const data = {
+                action: 'sync_tasks',
+                tasks: [testTask],
+                deviceId: testTask.deviceId
+            };
+
+            try {
+                log('Sending task sync request...');
+                log('Data being sent: ' + JSON.stringify(data, null, 2));
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const resultText = await response.text();
+                log('Task sync response status: ' + response.status);
+                log('Task sync response: ' + resultText);
+
+                try {
+                    const result = JSON.parse(resultText);
+                    if (result.success) {
+                        log('✅ Task sync successful!');
+                    } else {
+                        log('❌ Task sync failed: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (parseError) {
+                    log('❌ Failed to parse response as JSON: ' + parseError.message);
+                }
+            } catch (error) {
+                log('❌ Task sync request failed: ' + error.message);
+            }
+        }
+
+        async function testGetTasks() {
+            const url = document.getElementById('webhookUrl').value;
+            if (!url) {
+                log('Please enter webhook URL');
+                return;
+            }
+
+            const data = {
+                action: 'get_tasks',
+                deviceId: 'debug_device'
+            };
+
+            try {
+                log('Getting tasks from server...');
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const resultText = await response.text();
+                log('Get tasks response status: ' + response.status);
+                log('Get tasks response: ' + resultText);
+
+                try {
+                    const result = JSON.parse(resultText);
+                    if (result.success) {
+                        log('✅ Get tasks successful!');
+                        log('Tasks found: ' + result.tasks.length);
+                        result.tasks.forEach((task, index) => {
+                            log(`Task ${index + 1}: ${task.text} (ID: ${task.id}, Device: ${task.deviceId})`);
+                        });
+                    } else {
+                        log('❌ Get tasks failed: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (parseError) {
+                    log('❌ Failed to parse response as JSON: ' + parseError.message);
+                }
+            } catch (error) {
+                log('❌ Get tasks request failed: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

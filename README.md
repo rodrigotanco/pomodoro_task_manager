@@ -4,7 +4,7 @@ A comprehensive Pomodoro timer web application with task management, progress tr
 
 ## 🚀 **Use the App**
 
-**👉 [Launch Pomodoro Timer](https://yourusername.github.io/clase)** *(Replace with your actual GitHub Pages URL)*
+**👉 [Launch Pomodoro Timer](https://rodrigotanco.github.io/pomodoro_task_manager/)** *(Replace with your actual GitHub Pages URL)*
 
 ## ✨ **Features**
 

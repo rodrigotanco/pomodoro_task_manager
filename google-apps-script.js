@@ -1,11 +1,21 @@
 // Google Apps Script code for automatic Pomodoro data sync with full task synchronization
+// Version: 3.0.1 with CORS support
+//
 // Instructions:
 // 1. Open your Google Sheet
 // 2. Go to Extensions > Apps Script
 // 3. Delete existing code and paste this entire file
 // 4. Save the project (name it "Pomodoro Sync")
-// 5. Deploy as web app (Execute as: Me, Access: Anyone)
+// 5. Deploy as web app:
+//    - Click "Deploy" → "New deployment" (NOT "Manage deployments")
+//    - Type: Web app
+//    - Execute as: Me
+//    - Who has access: Anyone
 // 6. Copy the web app URL and use it in the Pomodoro timer settings
+//
+// IMPORTANT: After updating this script, you MUST create a "New deployment"
+// for CORS headers to work properly. Using "Manage deployments" won't apply
+// the new CORS configuration.
 
 // Configuration
 const ACTIVITY_SHEET_NAME = 'Activity Log';
@@ -16,6 +26,22 @@ const SETTINGS_SHEET_NAME = 'Settings';
 
 // Task schema version - increment when changing task structure
 const TASK_SCHEMA_VERSION = 3; // Added Completed Tasks and Work Sessions sync
+
+// CORS headers for all responses
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '86400' // 24 hours cache for preflight
+};
+
+// Handle OPTIONS requests for CORS preflight
+function doOptions(e) {
+  return ContentService
+    .createTextOutput('')
+    .setMimeType(ContentService.MimeType.JSON)
+    .setHeaders(CORS_HEADERS);
+}
 
 // Helper functions for sheet management
 function getOrCreateSheet(name, headers = []) {
@@ -90,11 +116,13 @@ function doPost(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT)
+        .setHeaders(CORS_HEADERS);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON);
+        .setMimeType(ContentService.MimeType.JSON)
+        .setHeaders(CORS_HEADERS);
     }
 
   } catch (error) {
@@ -107,11 +135,13 @@ function doPost(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(errorResponse) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT)
+        .setHeaders(CORS_HEADERS);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(errorResponse))
-        .setMimeType(ContentService.MimeType.JSON);
+        .setMimeType(ContentService.MimeType.JSON)
+        .setHeaders(CORS_HEADERS);
     }
   }
 }
@@ -445,11 +475,13 @@ function doGet(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(result) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT)
+        .setHeaders(CORS_HEADERS);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
+        .setMimeType(ContentService.MimeType.JSON)
+        .setHeaders(CORS_HEADERS);
     }
   }
 
@@ -469,12 +501,14 @@ function doGet(e) {
     // JSONP response
     return ContentService
       .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+      .setMimeType(ContentService.MimeType.JAVASCRIPT)
+      .setHeaders(CORS_HEADERS);
   } else {
     // Regular JSON response
     return ContentService
       .createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
+      .setMimeType(ContentService.MimeType.JSON)
+      .setHeaders(CORS_HEADERS);
   }
 }
 

@@ -2207,8 +2207,20 @@ class PomodoroTimer {
                 return { success: false, reason: `Invalid response: ${resultText}` };
             }
         } catch (error) {
+            // Detect CORS-specific errors
+            const isCorsError = error.message.includes('CORS') ||
+                               error.message.includes('fetch') ||
+                               error.name === 'TypeError';
+
+            if (isCorsError) {
+                console.warn('⚠️ CORS error detected. This usually means:\n' +
+                           '1. Google Apps Script needs to be redeployed\n' +
+                           '2. The script needs CORS headers (doOptions function)\n' +
+                           '3. Using JSONP fallback which works but is slower');
+            }
+
             console.log('Fetch failed, trying JSONP fallback:', error.message);
-            // Fallback to JSONP for file:// protocol
+            // Fallback to JSONP which bypasses CORS
             return await this.syncToGoogleSheetsJSONP(type, description, duration);
         }
     }

@@ -984,6 +984,9 @@ class PomodoroTimer {
             };
             this.workSessions.push(workSession);
 
+            // Queue sync of work session to Work Sessions sheet
+            this.syncQueue.enqueue({ type: 'sync_work_session', data: workSession });
+
             // Sync to Google Sheets automatically
             this.syncToGoogleSheets('Work Session', workSession.taskText, workSession.duration)
                 .then(result => {
@@ -1173,6 +1176,9 @@ class PomodoroTimer {
 
             // Also remove from server tasks (since it's completed and moved to completedTasks)
             this.deleteTaskFromServer(taskId);
+
+            // Queue sync of completed task to Completed Tasks sheet
+            this.syncQueue.enqueue({ type: 'sync_completed_task', data: task });
 
             // Clear selection if completed task was selected
             if (this.selectedTaskId === taskId) {
@@ -1764,6 +1770,9 @@ class PomodoroTimer {
                     await this.syncAllTasksToServer();
                 }
 
+                // Sync today's stats (completed tasks and work sessions)
+                await this.refreshTodayStats();
+
                 this.lastSyncTime = new Date().toISOString();
                 this.saveData();
                 this.updateSyncStatus('synced');
@@ -1778,6 +1787,111 @@ class PomodoroTimer {
             this.updateSyncStatus('error');
         } finally {
             this.syncInProgress = false;
+        }
+    }
+
+    async refreshTodayStats() {
+        if (!this.googleSheetsWebhook) {
+            console.log('No webhook configured, skipping stats refresh');
+            return;
+        }
+
+        const today = new Date().toDateString();
+        console.log('Refreshing today\'s stats for:', today);
+
+        try {
+            // Get completed tasks from server for today
+            const completedResult = await this.getCompletedTasksFromServer(today);
+            if (completedResult.success) {
+                this.mergeCompletedTasks(completedResult.completedTasks);
+                console.log(`Merged ${completedResult.completedTasks.length} completed tasks from server`);
+            }
+
+            // Get work sessions from server for today
+            const sessionsResult = await this.getWorkSessionsFromServer(today);
+            if (sessionsResult.success) {
+                this.mergeWorkSessions(sessionsResult.workSessions);
+                console.log(`Merged ${sessionsResult.workSessions.length} work sessions from server`);
+            }
+
+            // Update stats display
+            this.updateStats();
+        } catch (error) {
+            console.error('Error refreshing today\'s stats:', error);
+        }
+    }
+
+    async getCompletedTasksFromServer(date = null) {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        const data = {
+            action: 'get_completed_tasks',
+            date: date,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
+    async getWorkSessionsFromServer(date = null) {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        const data = {
+            action: 'get_work_sessions',
+            date: date,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
+    mergeCompletedTasks(serverTasks) {
+        // Create map of local tasks by ID for fast lookup
+        const localMap = new Map(this.completedTasks.map(t => [t.id, t]));
+
+        let addedCount = 0;
+
+        // Add server tasks that aren't in local storage
+        for (const serverTask of serverTasks) {
+            if (!localMap.has(serverTask.id)) {
+                this.completedTasks.push(serverTask);
+                addedCount++;
+            }
+        }
+
+        if (addedCount > 0) {
+            // Sort by completion time (newest first)
+            this.completedTasks.sort((a, b) =>
+                new Date(b.completedAt) - new Date(a.completedAt)
+            );
+            console.log(`Added ${addedCount} completed tasks from server`);
+        }
+    }
+
+    mergeWorkSessions(serverSessions) {
+        // Create map of local sessions by ID for fast lookup
+        const localMap = new Map(this.workSessions.map(s => [s.id, s]));
+
+        let addedCount = 0;
+
+        // Add server sessions that aren't in local storage
+        for (const serverSession of serverSessions) {
+            if (!localMap.has(serverSession.id)) {
+                this.workSessions.push(serverSession);
+                addedCount++;
+            }
+        }
+
+        if (addedCount > 0) {
+            // Sort by completion time (newest first)
+            this.workSessions.sort((a, b) =>
+                new Date(b.completedAt) - new Date(a.completedAt)
+            );
+            console.log(`Added ${addedCount} work sessions from server`);
         }
     }
 
@@ -2222,14 +2336,36 @@ class PomodoroTimer {
         // Group operations by type
         const syncTasks = operations.filter(op => op.type === 'sync_task').map(op => op.data);
         const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => op.data);
+        const syncCompletedTasks = operations.filter(op => op.type === 'sync_completed_task').map(op => op.data);
+        const syncWorkSessions = operations.filter(op => op.type === 'sync_work_session').map(op => op.data);
 
-        // Sync all tasks in one batch
+        // Sync all active tasks in one batch
         if (syncTasks.length > 0) {
-            console.log(`Syncing ${syncTasks.length} tasks...`);
+            console.log(`Syncing ${syncTasks.length} active tasks...`);
             try {
                 await this.syncAllTasksToServer();
             } catch (error) {
-                console.error('Error syncing tasks:', error);
+                console.error('Error syncing active tasks:', error);
+            }
+        }
+
+        // Sync completed tasks in one batch
+        if (syncCompletedTasks.length > 0) {
+            console.log(`Syncing ${syncCompletedTasks.length} completed tasks...`);
+            try {
+                await this.syncCompletedTasksToServer(syncCompletedTasks);
+            } catch (error) {
+                console.error('Error syncing completed tasks:', error);
+            }
+        }
+
+        // Sync work sessions in one batch
+        if (syncWorkSessions.length > 0) {
+            console.log(`Syncing ${syncWorkSessions.length} work sessions...`);
+            try {
+                await this.syncWorkSessionsToServer(syncWorkSessions);
+            } catch (error) {
+                console.error('Error syncing work sessions:', error);
             }
         }
 
@@ -2241,6 +2377,34 @@ class PomodoroTimer {
                 console.error('Error deleting task:', error);
             }
         }
+    }
+
+    async syncCompletedTasksToServer(completedTasks) {
+        if (!this.googleSheetsWebhook || completedTasks.length === 0) {
+            return { success: false, reason: 'No webhook configured or no tasks to sync' };
+        }
+
+        const data = {
+            action: 'sync_completed_tasks',
+            completedTasks: completedTasks,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
+    async syncWorkSessionsToServer(workSessions) {
+        if (!this.googleSheetsWebhook || workSessions.length === 0) {
+            return { success: false, reason: 'No webhook configured or no sessions to sync' };
+        }
+
+        const data = {
+            action: 'sync_work_sessions',
+            workSessions: workSessions,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
     }
 
     // Cleanup method to prevent memory leaks

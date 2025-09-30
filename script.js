@@ -1904,12 +1904,16 @@ class PomodoroTimer {
             this.saveData();
 
             // Update stats sync status indicator
-            if (errors.length === 0) {
-                this.statsSyncText.textContent = 'Synced';
-                const now = new Date().toLocaleTimeString();
-                this.statsSyncLastTime.textContent = `Last synced: ${now}`;
-            } else {
-                this.statsSyncText.textContent = 'Partial sync';
+            if (this.statsSyncText) {
+                if (errors.length === 0) {
+                    this.statsSyncText.textContent = 'Synced';
+                    if (this.statsSyncLastTime) {
+                        const now = new Date().toLocaleTimeString();
+                        this.statsSyncLastTime.textContent = `Last synced: ${now}`;
+                    }
+                } else {
+                    this.statsSyncText.textContent = 'Partial sync';
+                }
             }
 
             if (showUserFeedback) {
@@ -1932,7 +1936,9 @@ class PomodoroTimer {
             console.error('❌ [Stats Sync]', errorMessage, error);
 
             // Update stats sync status indicator
-            this.statsSyncText.textContent = 'Failed';
+            if (this.statsSyncText) {
+                this.statsSyncText.textContent = 'Failed';
+            }
 
             if (showUserFeedback) {
                 alert(`❌ Stats Sync Failed\n\n${error.message}\n\nPossible causes:\n• Google Apps Script not deployed\n• Incorrect webhook URL\n• Network connection issue\n• Script needs to be updated to version 3\n\nCheck browser console for details.`);

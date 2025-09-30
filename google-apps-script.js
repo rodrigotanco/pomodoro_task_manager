@@ -12,6 +12,9 @@ const ACTIVITY_SHEET_NAME = 'Activity Log';
 const TASKS_SHEET_NAME = 'Tasks';
 const SETTINGS_SHEET_NAME = 'Settings';
 
+// Task schema version - increment when changing task structure
+const TASK_SCHEMA_VERSION = 2; // Added Version field
+
 // Helper functions for sheet management
 function getOrCreateSheet(name, headers = []) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -125,7 +128,7 @@ function syncTasks(data) {
   console.log('syncTasks called with data:', JSON.stringify(data));
 
   const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
-    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
   const tasks = data.tasks || [];
@@ -146,10 +149,11 @@ function syncTasks(data) {
     if (existingRowIndex === -1) {
       // New task - add it
       const nextRow = sheet.getLastRow() + 1;
-      sheet.getRange(nextRow, 1, 1, 8).setValues([[
+      sheet.getRange(nextRow, 1, 1, 9).setValues([[
         task.id,
         task.text,
         task.completed || false,
+        task.version || 1,
         task.createdAt,
         task.completedAt || '',
         timestamp,
@@ -159,19 +163,20 @@ function syncTasks(data) {
       syncedCount++;
       console.log('Added new task to sheet:', task.text);
     } else {
-      // Existing task - check for conflicts
-      const existingData = sheet.getRange(existingRowIndex, 1, 1, 8).getValues()[0];
-      const existingModified = new Date(existingData[5]);
-      const taskModified = new Date(task.lastModified || task.createdAt);
+      // Existing task - check for conflicts using version first, then timestamp
+      const existingData = sheet.getRange(existingRowIndex, 1, 1, 9).getValues()[0];
+      const existingVersion = existingData[3] || 1;
+      const taskVersion = task.version || 1;
 
-      console.log('Comparing timestamps - Local:', taskModified.toISOString(), 'Server:', existingModified.toISOString());
+      console.log('Comparing versions - Client:', taskVersion, 'Server:', existingVersion);
 
-      if (taskModified > existingModified) {
-        // Update with newer data
-        sheet.getRange(existingRowIndex, 1, 1, 8).setValues([[
+      if (taskVersion > existingVersion) {
+        // Client has newer version - update
+        sheet.getRange(existingRowIndex, 1, 1, 9).setValues([[
           task.id,
           task.text,
           task.completed || false,
+          taskVersion,
           task.createdAt,
           task.completedAt || '',
           timestamp,
@@ -179,21 +184,40 @@ function syncTasks(data) {
           'synced'
         ]]);
         syncedCount++;
-        console.log('Updated task with newer data:', task.text);
-      } else if (taskModified < existingModified) {
-        // Conflict detected - existing data is newer
+        console.log('Updated task with newer version:', task.text);
+      } else if (taskVersion < existingVersion) {
+        // Server has newer version - conflict
         conflictsCount++;
         conflicts.push({
           taskId: task.id,
           reason: 'newer_version_exists',
-          serverVersion: existingData[1],
-          clientVersion: task.text
+          serverVersion: existingVersion,
+          clientVersion: taskVersion
         });
-        console.log('Conflict detected for task:', task.id);
+        console.log('Conflict detected - server has newer version:', task.id);
       } else {
-        console.log('Task already in sync:', task.text);
+        // Same version - use timestamp as tiebreaker
+        const existingModified = new Date(existingData[6]);
+        const taskModified = new Date(task.lastModified || task.createdAt);
+
+        if (taskModified > existingModified) {
+          sheet.getRange(existingRowIndex, 1, 1, 9).setValues([[
+            task.id,
+            task.text,
+            task.completed || false,
+            taskVersion,
+            task.createdAt,
+            task.completedAt || '',
+            timestamp,
+            deviceId,
+            'synced'
+          ]]);
+          syncedCount++;
+          console.log('Updated task (same version, newer timestamp):', task.text);
+        } else {
+          console.log('Task already in sync:', task.text);
+        }
       }
-      // If timestamps are equal, no action needed
     }
   }
 
@@ -213,7 +237,7 @@ function getTasks(data) {
   console.log('getTasks called with data:', JSON.stringify(data));
 
   const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
-    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
   const lastRow = sheet.getLastRow();
@@ -224,7 +248,7 @@ function getTasks(data) {
     return { success: true, tasks: [] };
   }
 
-  const dataRange = sheet.getRange(2, 1, lastRow - 1, 8);
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 9);
   const values = dataRange.getValues();
 
   const tasks = values
@@ -233,11 +257,12 @@ function getTasks(data) {
       id: row[0],
       text: row[1],
       completed: row[2],
-      createdAt: row[3],
-      completedAt: row[4] || null,
-      lastModified: row[5],
-      deviceId: row[6],
-      syncStatus: row[7]
+      version: row[3] || 1,
+      createdAt: row[4],
+      completedAt: row[5] || null,
+      lastModified: row[6],
+      deviceId: row[7],
+      syncStatus: row[8]
     }));
 
   const result = {
@@ -252,7 +277,7 @@ function getTasks(data) {
 
 function updateTask(data) {
   const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
-    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
   const task = data.task;
@@ -265,10 +290,11 @@ function updateTask(data) {
     return { success: false, error: 'Task not found' };
   }
 
-  sheet.getRange(rowIndex, 1, 1, 8).setValues([[
+  sheet.getRange(rowIndex, 1, 1, 9).setValues([[
     task.id,
     task.text,
     task.completed || false,
+    task.version || 1,
     task.createdAt,
     task.completedAt || '',
     timestamp,
@@ -286,7 +312,7 @@ function deleteTask(data) {
   console.log('deleteTask called with data:', JSON.stringify(data));
 
   const sheet = getOrCreateSheet(TASKS_SHEET_NAME, [
-    'ID', 'Text', 'Completed', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
   const taskId = data.taskId;

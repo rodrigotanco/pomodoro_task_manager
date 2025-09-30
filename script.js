@@ -1,4 +1,90 @@
+// Utility function: Generate UUID v4 for unique task IDs
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+// SyncQueue class: Manages sync operations with debouncing to prevent race conditions
+class SyncQueue {
+    constructor(processor, debounceMs = 500) {
+        this.queue = [];
+        this.isProcessing = false;
+        this.debounceTimer = null;
+        this.processor = processor; // Function that processes queued operations
+        this.debounceMs = debounceMs;
+    }
+
+    enqueue(operation) {
+        console.log('SyncQueue: Enqueuing operation:', operation.type, operation.data?.id || operation.data?.taskId);
+        this.queue.push(operation);
+        this.scheduleProcessing();
+    }
+
+    scheduleProcessing() {
+        // Clear existing debounce timer
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+        }
+
+        // Schedule processing after debounce period
+        this.debounceTimer = setTimeout(() => {
+            this.processQueue();
+        }, this.debounceMs);
+    }
+
+    async processQueue() {
+        if (this.isProcessing || this.queue.length === 0) {
+            return;
+        }
+
+        this.isProcessing = true;
+        console.log(`SyncQueue: Processing ${this.queue.length} queued operations...`);
+
+        // Get all queued operations and clear the queue
+        const operations = [...this.queue];
+        this.queue = [];
+
+        try {
+            // Process batch of operations
+            await this.processor(operations);
+            console.log('SyncQueue: Batch processing completed successfully');
+        } catch (error) {
+            console.error('SyncQueue: Error processing batch:', error);
+        } finally {
+            this.isProcessing = false;
+
+            // Process any new operations that arrived during processing
+            if (this.queue.length > 0) {
+                this.scheduleProcessing();
+            }
+        }
+    }
+
+    clear() {
+        this.queue = [];
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+    }
+}
+
 class PomodoroTimer {
+    // Constants
+    static AUTO_SAVE_INTERVAL = 30000;      // 30 seconds
+    static SYNC_INTERVAL = 60000;           // 60 seconds (1 minute)
+    static INITIAL_SYNC_DELAY = 2000;       // 2 seconds
+    static JSONP_TIMEOUT = 10000;           // 10 seconds
+    static DATA_RETENTION_DAYS = 30;        // Keep last 30 days
+    static MIN_TASK_TIME = 30;              // 30 seconds minimum for task completion
+    static MAX_DELETED_TASK_IDS = 100;      // Max deleted task IDs to track
+    static MAX_ACTIVITY_LOG_ITEMS = 20;     // Max activity log items
+    static DATE_CHECK_INTERVAL = 300000;    // 5 minutes
+    static DELETED_TASK_RETENTION_DAYS = 90; // Keep deleted task IDs for 90 days
+
     constructor() {
         this.workDuration = 25 * 60; // 25 minutes in seconds
         this.breakDuration = 5 * 60; // 5 minutes in seconds
@@ -25,7 +111,23 @@ class PomodoroTimer {
         this.lastSyncTime = null;
         this.syncInProgress = false;
         this.syncTimer = null;
-        this.deletedTaskIds = new Set(); // Track recently deleted/completed task IDs
+        this.deletedTaskIds = new Map(); // Track recently deleted/completed task IDs with timestamps
+
+        // Date change detection
+        this.currentDate = new Date().toDateString();
+        this.midnightResetTimer = null;
+        this.dateCheckInterval = null;
+
+        // Timers and intervals for cleanup
+        this.autoSaveInterval = null;
+        this.dailyReportTimer = null;
+        this.workerBlobURL = null;
+
+        // Initialize sync queue for batching operations
+        this.syncQueue = new SyncQueue(
+            (operations) => this.processSyncBatch(operations),
+            500 // 500ms debounce
+        );
 
         this.initializeElements();
         this.loadData();
@@ -33,6 +135,7 @@ class PomodoroTimer {
         this.bindEvents();
         this.updateDisplay();
         this.scheduleDailyReport();
+        this.scheduleMidnightReset();
         this.startPeriodicSync();
         this.initializeSleepResistance();
     }
@@ -147,7 +250,7 @@ class PomodoroTimer {
         // this.testConnectionBtn.addEventListener('click', () => this.testConnection()); // Commented out
 
         // Auto-save data periodically
-        setInterval(() => this.saveData(), 30000); // Save every 30 seconds
+        this.autoSaveInterval = setInterval(() => this.saveData(), PomodoroTimer.AUTO_SAVE_INTERVAL);
     }
 
     async initializeSleepResistance() {
@@ -227,7 +330,8 @@ class PomodoroTimer {
 
         try {
             const blob = new Blob([workerCode], { type: 'application/javascript' });
-            this.worker = new Worker(URL.createObjectURL(blob));
+            this.workerBlobURL = URL.createObjectURL(blob);
+            this.worker = new Worker(this.workerBlobURL);
 
             this.worker.addEventListener('message', (e) => {
                 const { type, timeLeft, elapsed } = e.data;
@@ -267,9 +371,14 @@ class PomodoroTimer {
 
     releaseWakeLock() {
         if (this.wakeLock) {
-            this.wakeLock.release();
-            this.wakeLock = null;
-            console.log('Wake lock released manually');
+            try {
+                this.wakeLock.release();
+                this.wakeLock = null;
+                console.log('Wake lock released manually');
+            } catch (error) {
+                console.error('Failed to release wake lock:', error);
+                this.wakeLock = null;
+            }
         }
     }
 
@@ -318,16 +427,17 @@ class PomodoroTimer {
         // Check if task is in completed tasks array
         const isInCompletedTasks = this.completedTasks.some(task => task.id == taskId);
 
-        // Check if task is in recently deleted IDs
+        // Check if task is in recently deleted IDs Map
         const isRecentlyDeleted = this.deletedTaskIds.has(taskId);
 
         return isInCompletedTasks || isRecentlyDeleted;
     }
 
     addToDeletedTasks(taskId) {
-        this.deletedTaskIds.add(taskId);
+        // Store task ID with current timestamp
+        this.deletedTaskIds.set(taskId, Date.now());
 
-        // Clean up old deleted task IDs (keep only last 24 hours worth)
+        // Clean up old deleted task IDs
         this.cleanupDeletedTasks();
 
         // Save to localStorage for persistence
@@ -335,24 +445,77 @@ class PomodoroTimer {
     }
 
     cleanupDeletedTasks() {
-        // For now, keep deleted IDs simple - we can enhance later with timestamps
-        // Limit to 100 recent deletions to prevent memory bloat
-        if (this.deletedTaskIds.size > 100) {
-            const idsArray = Array.from(this.deletedTaskIds);
-            this.deletedTaskIds = new Set(idsArray.slice(-50)); // Keep last 50
+        // Remove deleted task IDs older than DELETED_TASK_RETENTION_DAYS
+        const cutoffTime = Date.now() - (PomodoroTimer.DELETED_TASK_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+        for (const [taskId, timestamp] of this.deletedTaskIds.entries()) {
+            if (timestamp < cutoffTime) {
+                this.deletedTaskIds.delete(taskId);
+                console.log('Removed old deleted task ID from tracking:', taskId);
+            }
         }
     }
 
     saveDeletedTaskIds() {
-        const deletedIds = Array.from(this.deletedTaskIds);
-        localStorage.setItem('pomodoroDeletedTaskIds', JSON.stringify(deletedIds));
+        // Convert Map to array of [id, timestamp] pairs for storage
+        const deletedIdsArray = Array.from(this.deletedTaskIds.entries());
+        localStorage.setItem('pomodoroDeletedTaskIds', JSON.stringify(deletedIdsArray));
     }
 
     loadDeletedTaskIds() {
         const savedDeletedIds = localStorage.getItem('pomodoroDeletedTaskIds');
         if (savedDeletedIds) {
-            const idsArray = JSON.parse(savedDeletedIds);
-            this.deletedTaskIds = new Set(idsArray);
+            try {
+                const deletedIdsArray = JSON.parse(savedDeletedIds);
+
+                // Handle both old format (array of IDs) and new format (array of [id, timestamp] pairs)
+                if (deletedIdsArray.length > 0) {
+                    if (Array.isArray(deletedIdsArray[0])) {
+                        // New format: array of [id, timestamp] pairs
+                        this.deletedTaskIds = new Map(deletedIdsArray);
+                    } else {
+                        // Old format: array of IDs - convert to Map with current timestamp
+                        const now = Date.now();
+                        this.deletedTaskIds = new Map(deletedIdsArray.map(id => [id, now]));
+                        console.log('Migrated old deleted task IDs format to new format');
+                    }
+                }
+
+                // Clean up old entries after loading
+                this.cleanupDeletedTasks();
+            } catch (error) {
+                console.error('Error loading deleted task IDs:', error);
+                this.deletedTaskIds = new Map();
+            }
+        }
+    }
+
+    cleanupOldData() {
+        // Clean up data older than DATA_RETENTION_DAYS
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - PomodoroTimer.DATA_RETENTION_DAYS);
+        const cutoffTime = cutoffDate.getTime();
+
+        // Clean completed tasks
+        const initialCompletedCount = this.completedTasks.length;
+        this.completedTasks = this.completedTasks.filter(task => {
+            const taskDate = new Date(task.completedAt);
+            return taskDate.getTime() >= cutoffTime;
+        });
+
+        // Clean work sessions
+        const initialSessionsCount = this.workSessions.length;
+        this.workSessions = this.workSessions.filter(session => {
+            const sessionDate = new Date(session.completedAt);
+            return sessionDate.getTime() >= cutoffTime;
+        });
+
+        const removedTasks = initialCompletedCount - this.completedTasks.length;
+        const removedSessions = initialSessionsCount - this.workSessions.length;
+
+        if (removedTasks > 0 || removedSessions > 0) {
+            console.log(`Data cleanup: Removed ${removedTasks} old tasks and ${removedSessions} old sessions`);
+            this.saveData(); // Save after cleanup
         }
     }
 
@@ -362,6 +525,7 @@ class PomodoroTimer {
             const data = JSON.parse(savedData);
             this.tasks = (data.tasks || []).map(task => ({
                 ...task,
+                version: task.version || 1,  // Add version for old tasks without it
                 lastModified: task.lastModified || task.createdAt || new Date().toISOString(),
                 deviceId: task.deviceId || this.deviceId
             }));
@@ -385,6 +549,9 @@ class PomodoroTimer {
 
         // Load deleted task IDs
         this.loadDeletedTaskIds();
+
+        // Clean up old data (30+ days)
+        this.cleanupOldData();
 
         this.renderTasks();
         this.updateStats();
@@ -506,24 +673,28 @@ class PomodoroTimer {
                 action: 'start',
                 data: { duration: this.timeLeft }
             });
-        }
-
-        // Fallback timer for browsers without Web Worker support
-        this.timer = setInterval(() => {
-            if (!this.worker) {
-                // Only use fallback if worker is not available
+        } else {
+            // Fallback timer for browsers without Web Worker support
+            this.timer = setInterval(() => {
                 this.timeLeft--;
                 this.updateDisplay();
 
                 if (this.timeLeft <= 0) {
                     this.completeSession();
                 }
-            }
-        }, 1000);
+            }, 1000);
+        }
 
         if (this.isWorkSession && this.selectedTaskId) {
             const task = this.tasks.find(t => t.id === this.selectedTaskId);
-            this.addActivity(`🍅 Started work session: ${task.text}`);
+            if (task) {
+                this.addActivity(`🍅 Started work session: ${task.text}`);
+            } else {
+                console.warn('Selected task not found, clearing selection');
+                this.selectedTaskId = null;
+                this.pauseTimer();
+                return;
+            }
         } else {
             this.addActivity('☕ Started break');
         }
@@ -805,7 +976,7 @@ class PomodoroTimer {
 
             // Record work session
             const workSession = {
-                id: Date.now(),
+                id: generateUUID(),  // Use UUID instead of Date.now()
                 taskId: this.selectedTaskId,
                 taskText: task ? task.text : 'Unknown task',
                 duration: this.workDuration,
@@ -824,7 +995,8 @@ class PomodoroTimer {
                 });
 
             // Handle case where Pomodoro is complete but task isn't finished
-            if (task && !task.completed) {
+            // Only show prompt if task still exists and isn't completed
+            if (task && !task.completed && this.tasks.find(t => t.id === this.selectedTaskId)) {
                 const continueTask = confirm(
                     `🍅 Pomodoro completed!\n\nTask: "${task.text}"\n\nIs this task finished?\n\nClick OK if complete, Cancel to continue working on it.`
                 );
@@ -836,6 +1008,10 @@ class PomodoroTimer {
                     // Task continues to next Pomodoro
                     this.addActivity(`🔄 Continuing task: ${task.text}`);
                 }
+            } else if (this.selectedTaskId && !task) {
+                // Task was deleted during session
+                console.warn('Task was deleted during work session');
+                this.selectedTaskId = null;
             }
 
             // Switch to break
@@ -919,9 +1095,10 @@ class PomodoroTimer {
 
         const now = new Date().toISOString();
         const task = {
-            id: Date.now(),
+            id: generateUUID(),  // Use UUID instead of Date.now() for guaranteed uniqueness
             text: text,
             completed: false,
+            version: 1,  // Initialize version for conflict resolution
             createdAt: now,
             lastModified: now,
             deviceId: this.deviceId
@@ -933,8 +1110,8 @@ class PomodoroTimer {
         this.saveData();
         this.addActivity(`📝 Added task: ${text}`);
 
-        // Trigger immediate sync for new task
-        this.syncTaskToServer(task);
+        // Queue sync operation (will be debounced with other operations)
+        this.syncQueue.enqueue({ type: 'sync_task', data: task });
     }
 
     selectTask(taskId) {
@@ -952,11 +1129,11 @@ class PomodoroTimer {
     completeTask(taskId, event) {
         event.stopPropagation();
 
-        // Check minimum time requirement (30 seconds)
+        // Check minimum time requirement
         if (this.isRunning && this.isWorkSession && this.selectedTaskId === taskId) {
             const elapsedTime = this.currentDuration - this.timeLeft;
-            if (elapsedTime < 30) {
-                alert('You need to spend at least 30 seconds on a task before completing it!');
+            if (elapsedTime < PomodoroTimer.MIN_TASK_TIME) {
+                alert(`You need to spend at least ${PomodoroTimer.MIN_TASK_TIME} seconds on a task before completing it!`);
                 return;
             }
 
@@ -988,7 +1165,7 @@ class PomodoroTimer {
             this.syncToGoogleSheets('Task', task.text)
                 .then(result => {
                     if (result.success) {
-                        this.addActivity(`✅ Task synced to Google Sheets: ${task.text}`);
+                        console.log('Task synced to Google Sheets:', task.text);
                     } else {
                         console.log('Google Sheets sync failed for task:', result.reason);
                     }
@@ -1006,6 +1183,7 @@ class PomodoroTimer {
             this.updateDisplay();
             this.updateStats();
             this.saveData();
+            // Add activity ONCE for task completion
             this.addActivity(`✅ Completed task: ${task.text}`);
         }
     }
@@ -1129,10 +1307,10 @@ class PomodoroTimer {
             timestamp: new Date().toISOString()
         };
 
-        // Keep only last 20 activities
+        // Keep only last MAX_ACTIVITY_LOG_ITEMS activities
         const activities = JSON.parse(localStorage.getItem('pomodoroActivities') || '[]');
         activities.unshift(activity);
-        activities.splice(20);
+        activities.splice(PomodoroTimer.MAX_ACTIVITY_LOG_ITEMS);
 
         localStorage.setItem('pomodoroActivities', JSON.stringify(activities));
         this.updateActivityLog();
@@ -1335,7 +1513,7 @@ class PomodoroTimer {
                     delete window[callbackName];
                     resolve({ success: false, reason: 'Request timeout' });
                 }
-            }, 10000);
+            }, PomodoroTimer.JSONP_TIMEOUT);
         });
     }
 
@@ -1519,7 +1697,7 @@ class PomodoroTimer {
                     delete window[callbackName];
                     resolve({ success: false, reason: 'Request timeout' });
                 }
-            }, 10000);
+            }, PomodoroTimer.JSONP_TIMEOUT);
         });
     }
 
@@ -1560,7 +1738,7 @@ class PomodoroTimer {
                     delete window[callbackName];
                     resolve({ success: false, reason: 'Request timeout' });
                 }
-            }, 10000);
+            }, PomodoroTimer.JSONP_TIMEOUT);
         });
     }
 
@@ -1628,22 +1806,38 @@ class PomodoroTimer {
                 console.log('➕ Added new task from server:', serverTask.text);
                 this.addActivity(`🔄 Synced new task from another device: ${serverTask.text}`);
             } else {
-                // Task exists locally - check for conflicts
+                // Task exists locally - check for conflicts using version first, then timestamp
                 const localTask = this.tasks.find(t => t.id === taskId);
-                const serverModified = new Date(serverTask.lastModified);
-                const localModified = new Date(localTask.lastModified);
+                const serverVersion = serverTask.version || 1;
+                const localVersion = localTask.version || 1;
 
-                if (serverModified > localModified) {
-                    // Server version is newer, update local
+                // Compare versions first (more reliable than timestamps)
+                if (serverVersion > localVersion) {
+                    // Server has newer version
                     const index = mergedTasks.findIndex(t => t.id === taskId);
-                    mergedTasks[index] = serverTask;
+                    mergedTasks[index] = { ...serverTask, version: serverVersion };
                     hasChanges = true;
-                    console.log('🔄 Updated task with server version:', serverTask.text);
+                    console.log(`🔄 Updated task with server version (v${serverVersion} > v${localVersion}):`, serverTask.text);
                     this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
-                } else if (serverModified < localModified) {
-                    console.log('📍 Keeping local version (newer):', localTask.text);
+                } else if (serverVersion < localVersion) {
+                    // Local has newer version
+                    console.log(`📍 Keeping local version (v${localVersion} > v${serverVersion}):`, localTask.text);
                 } else {
-                    console.log('🟰 Tasks in sync:', localTask.text);
+                    // Same version - use timestamp as tiebreaker
+                    const serverModified = new Date(serverTask.lastModified);
+                    const localModified = new Date(localTask.lastModified);
+
+                    if (serverModified > localModified) {
+                        const index = mergedTasks.findIndex(t => t.id === taskId);
+                        mergedTasks[index] = { ...serverTask, version: serverVersion };
+                        hasChanges = true;
+                        console.log('🔄 Updated task with server version (same version, newer timestamp):', serverTask.text);
+                        this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
+                    } else if (serverModified < localModified) {
+                        console.log('📍 Keeping local version (same version, newer timestamp):', localTask.text);
+                    } else {
+                        console.log('🟰 Tasks in sync (same version and timestamp):', localTask.text);
+                    }
                 }
             }
         }
@@ -1957,14 +2151,14 @@ class PomodoroTimer {
         // Initial sync on app start (after a short delay to let UI load)
         setTimeout(() => {
             this.performFullSync();
-        }, 2000);
+        }, PomodoroTimer.INITIAL_SYNC_DELAY);
 
         // Schedule periodic sync every 60 seconds
         this.syncTimer = setInterval(() => {
             if (!this.syncInProgress) {
                 this.performFullSync();
             }
-        }, 60000);
+        }, PomodoroTimer.SYNC_INTERVAL);
     }
 
     scheduleDailyReport() {
@@ -1982,6 +2176,131 @@ class PomodoroTimer {
             // Schedule next day
             this.scheduleDailyReport();
         }, timeUntilReport);
+    }
+
+    scheduleMidnightReset() {
+        // Use periodic checking instead of long setTimeout for reliability
+        // Check every 5 minutes if the date has changed
+        if (this.dateCheckInterval) {
+            clearInterval(this.dateCheckInterval);
+        }
+
+        console.log('Scheduling periodic date checks for midnight reset');
+
+        this.dateCheckInterval = setInterval(() => {
+            const newDate = new Date().toDateString();
+
+            if (newDate !== this.currentDate) {
+                // Date has changed - trigger midnight reset
+                console.log('Date changed detected:', this.currentDate, '->', newDate);
+
+                this.currentDate = newDate;
+
+                // Refresh the UI to show new day's stats
+                this.updateStats();
+                this.updateActivityLog();
+
+                // Add activity notification
+                this.addActivity('📅 New day started - stats reset');
+
+                // Show notification if enabled
+                this.showNotification(
+                    '📅 New Day!',
+                    'Your daily stats have been reset. Have a productive day!',
+                    '🌅'
+                );
+
+                console.log('Midnight reset triggered - new day:', this.currentDate);
+            }
+        }, PomodoroTimer.DATE_CHECK_INTERVAL);
+    }
+
+    // Process batched sync operations
+    async processSyncBatch(operations) {
+        console.log(`Processing sync batch with ${operations.length} operations`);
+
+        // Group operations by type
+        const syncTasks = operations.filter(op => op.type === 'sync_task').map(op => op.data);
+        const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => op.data);
+
+        // Sync all tasks in one batch
+        if (syncTasks.length > 0) {
+            console.log(`Syncing ${syncTasks.length} tasks...`);
+            try {
+                await this.syncAllTasksToServer();
+            } catch (error) {
+                console.error('Error syncing tasks:', error);
+            }
+        }
+
+        // Delete tasks from server
+        for (const taskId of deleteTasks) {
+            try {
+                await this.deleteTaskFromServer(taskId);
+            } catch (error) {
+                console.error('Error deleting task:', error);
+            }
+        }
+    }
+
+    // Cleanup method to prevent memory leaks
+    cleanup() {
+        console.log('Cleaning up Pomodoro Timer resources...');
+
+        // Clear all intervals
+        if (this.autoSaveInterval) {
+            clearInterval(this.autoSaveInterval);
+            this.autoSaveInterval = null;
+        }
+        if (this.syncTimer) {
+            clearInterval(this.syncTimer);
+            this.syncTimer = null;
+        }
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+        if (this.dateCheckInterval) {
+            clearInterval(this.dateCheckInterval);
+            this.dateCheckInterval = null;
+        }
+
+        // Clear all timeouts
+        if (this.midnightResetTimer) {
+            clearTimeout(this.midnightResetTimer);
+            this.midnightResetTimer = null;
+        }
+        if (this.dailyReportTimer) {
+            clearTimeout(this.dailyReportTimer);
+            this.dailyReportTimer = null;
+        }
+
+        // Terminate Web Worker
+        if (this.worker) {
+            this.worker.postMessage({ action: 'stop' });
+            this.worker.terminate();
+            this.worker = null;
+        }
+
+        // Revoke blob URL
+        if (this.workerBlobURL) {
+            URL.revokeObjectURL(this.workerBlobURL);
+            this.workerBlobURL = null;
+        }
+
+        // Release wake lock
+        this.releaseWakeLock();
+
+        // Clear sync queue
+        if (this.syncQueue) {
+            this.syncQueue.clear();
+        }
+
+        // Note: We don't remove event listeners here because they're on global objects
+        // and removing them would require storing references to the listener functions
+        // For a full cleanup in an SPA, consider using a more sophisticated event management system
+
+        console.log('Cleanup complete');
     }
 }
 

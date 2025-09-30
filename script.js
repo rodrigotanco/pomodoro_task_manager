@@ -202,7 +202,6 @@ class PomodoroTimer {
         this.syncStatusIcon = document.getElementById('syncStatusIcon');
         this.syncStatusText = document.getElementById('syncStatusText');
         this.syncLastTime = document.getElementById('syncLastTime');
-        this.refreshStatsBtn = document.getElementById('refreshStatsBtn');
         this.statsSyncText = document.getElementById('statsSyncText');
         this.statsSyncLastTime = document.getElementById('statsSyncLastTime');
 
@@ -233,7 +232,6 @@ class PomodoroTimer {
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
         this.syncNowBtn.addEventListener('click', () => this.manualSync());
-        this.refreshStatsBtn.addEventListener('click', () => this.manualRefreshStats());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -2383,31 +2381,27 @@ class PomodoroTimer {
             return;
         }
 
-        // Perform both task sync and activity sync
+        // Update both status indicators
+        this.updateSyncStatus('syncing');
+        if (this.statsSyncText) {
+            this.statsSyncText.textContent = 'Syncing...';
+        }
+
+        // Perform full sync (includes task sync + stats sync)
         await this.performFullSync();
+
+        // Also sync activity log
         await this.syncTodayData();
-    }
 
-    async manualRefreshStats() {
-        if (!this.googleSheetsWebhook) {
-            alert('❌ No webhook URL configured!\nPlease add your Google Apps Script webhook URL in settings to enable stats sync.');
-            return;
-        }
+        // Show success message with details
+        const completedCount = this.completedTasks.filter(t =>
+            new Date(t.completedAt).toDateString() === new Date().toDateString()
+        ).length;
+        const sessionsCount = this.workSessions.filter(s =>
+            new Date(s.completedAt).toDateString() === new Date().toDateString()
+        ).length;
 
-        // Update status indicator
-        this.statsSyncText.textContent = 'Syncing...';
-
-        // Call refreshTodayStats with user feedback enabled
-        const result = await this.refreshTodayStats(true);
-
-        // Update status based on result
-        if (result && result.success) {
-            this.statsSyncText.textContent = 'Synced';
-            const now = new Date().toLocaleTimeString();
-            this.statsSyncLastTime.textContent = `Last synced: ${now}`;
-        } else {
-            this.statsSyncText.textContent = 'Failed';
-        }
+        console.log(`✅ Manual sync completed! Today's stats: ${completedCount} tasks, ${sessionsCount} sessions`);
     }
 
     startPeriodicSync() {

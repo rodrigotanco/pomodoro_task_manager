@@ -1693,10 +1693,11 @@ class PomodoroTimer {
     }
 
     async performApiCall(data) {
+        // Use text/plain to bypass CORS preflight (Google Apps Script limitation)
         const response = await fetch(this.googleSheetsWebhook, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'text/plain;charset=utf-8',
             },
             body: JSON.stringify(data)
         });
@@ -2179,11 +2180,12 @@ class PomodoroTimer {
         console.log('Webhook URL:', this.googleSheetsWebhook);
 
         // Try fetch first, fallback to JSONP
+        // Use text/plain to bypass CORS preflight (Google Apps Script workaround)
         try {
             const response = await fetch(this.googleSheetsWebhook, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'text/plain;charset=utf-8',
                 },
                 body: JSON.stringify(data)
             });

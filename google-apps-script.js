@@ -1,5 +1,5 @@
 // Google Apps Script code for automatic Pomodoro data sync with full task synchronization
-// Version: 3.0.1 with CORS support
+// Version: 3.0.2 with text/plain CORS bypass
 //
 // Instructions:
 // 1. Open your Google Sheet
@@ -13,9 +13,11 @@
 //    - Who has access: Anyone
 // 6. Copy the web app URL and use it in the Pomodoro timer settings
 //
-// IMPORTANT: After updating this script, you MUST create a "New deployment"
-// for CORS headers to work properly. Using "Manage deployments" won't apply
-// the new CORS configuration.
+// CORS WORKAROUND: Google Apps Script doesn't always respect CORS headers when
+// deployed as a Web App. To bypass this limitation, the client sends requests
+// with Content-Type: text/plain which is treated as a "simple request" and
+// doesn't trigger CORS preflight. The doOptions() function is still included
+// for completeness, but the text/plain approach is more reliable.
 
 // Configuration
 const ACTIVITY_SHEET_NAME = 'Activity Log';

@@ -70,6 +70,19 @@ class SyncQueue {
             this.debounceTimer = null;
         }
     }
+
+    // Flush queue immediately (for before unload)
+    async flush() {
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+
+        if (this.queue.length > 0) {
+            console.log(`🔄 Flushing ${this.queue.length} pending sync operations before page unload`);
+            await this.processQueue();
+        }
+    }
 }
 
 class PomodoroTimer {
@@ -189,6 +202,9 @@ class PomodoroTimer {
         this.syncStatusIcon = document.getElementById('syncStatusIcon');
         this.syncStatusText = document.getElementById('syncStatusText');
         this.syncLastTime = document.getElementById('syncLastTime');
+        this.refreshStatsBtn = document.getElementById('refreshStatsBtn');
+        this.statsSyncText = document.getElementById('statsSyncText');
+        this.statsSyncLastTime = document.getElementById('statsSyncLastTime');
 
         // Audio element
         this.alarmSound = document.getElementById('alarmSound');
@@ -217,6 +233,7 @@ class PomodoroTimer {
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
         this.syncNowBtn.addEventListener('click', () => this.manualSync());
+        this.refreshStatsBtn.addEventListener('click', () => this.manualRefreshStats());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -251,6 +268,17 @@ class PomodoroTimer {
 
         // Auto-save data periodically
         this.autoSaveInterval = setInterval(() => this.saveData(), PomodoroTimer.AUTO_SAVE_INTERVAL);
+
+        // Flush sync queue before page unload to prevent data loss
+        window.addEventListener('beforeunload', async (e) => {
+            console.log('🔄 Page unload detected, flushing sync queue...');
+            // Flush the queue synchronously
+            if (this.syncQueue && this.syncQueue.queue.length > 0) {
+                // Note: Modern browsers limit what can be done in beforeunload
+                // but we'll try to flush critical data
+                await this.syncQueue.flush();
+            }
+        });
     }
 
     async initializeSleepResistance() {
@@ -1400,6 +1428,21 @@ class PomodoroTimer {
         return report;
     }
 
+    async checkServerVersion() {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        try {
+            const data = { action: 'get_version' };
+            const result = await this.performApiCall(data);
+            return result;
+        } catch (error) {
+            console.error('Error checking server version:', error);
+            return { success: false, reason: error.message };
+        }
+    }
+
     async testGoogleSheetsConnection() {
         if (!this.googleSheetsWebhook) {
             alert('❌ No webhook URL configured!\nPlease add your Google Apps Script webhook URL in settings.');
@@ -1408,6 +1451,18 @@ class PomodoroTimer {
 
         try {
             console.log('Testing connection to:', this.googleSheetsWebhook);
+
+            // Check server version first
+            const versionResult = await this.checkServerVersion();
+            if (versionResult.success) {
+                console.log('✅ Server version:', versionResult.version, versionResult.versionName);
+                if (versionResult.version < 3) {
+                    alert(`⚠️ Server Update Required\n\nYour Google Apps Script is running version ${versionResult.version}.\nVersion 3 is required for stats sync.\n\nPlease update your Google Apps Script and redeploy.`);
+                    return;
+                }
+            } else {
+                console.warn('⚠️ Could not verify server version:', versionResult.reason);
+            }
 
             // Test with GET request first
             const testResponse = await fetch(this.googleSheetsWebhook, {
@@ -1790,34 +1845,102 @@ class PomodoroTimer {
         }
     }
 
-    async refreshTodayStats() {
+    async refreshTodayStats(showUserFeedback = false) {
         if (!this.googleSheetsWebhook) {
-            console.log('No webhook configured, skipping stats refresh');
-            return;
+            const message = 'No webhook configured - stats sync disabled';
+            console.log(message);
+            if (showUserFeedback) {
+                alert('❌ Stats Sync Failed\n\nNo Google Sheets webhook URL configured.\nPlease add your webhook URL in settings to enable stats sync across devices.');
+            }
+            return { success: false, reason: 'no_webhook' };
         }
 
         const today = new Date().toDateString();
-        console.log('Refreshing today\'s stats for:', today);
+        console.log('🔄 [Stats Sync] Starting sync for:', today);
 
         try {
+            let completedCount = 0;
+            let sessionsCount = 0;
+            let errors = [];
+
             // Get completed tasks from server for today
+            console.log('🔄 [Stats Sync] Fetching completed tasks from server...');
             const completedResult = await this.getCompletedTasksFromServer(today);
+
             if (completedResult.success) {
-                this.mergeCompletedTasks(completedResult.completedTasks);
-                console.log(`Merged ${completedResult.completedTasks.length} completed tasks from server`);
+                const beforeCount = this.completedTasks.length;
+                this.mergeCompletedTasks(completedResult.completedTasks || []);
+                const afterCount = this.completedTasks.length;
+                const newTasks = afterCount - beforeCount;
+                completedCount = completedResult.completedTasks?.length || 0;
+                console.log(`✅ [Stats Sync] Received ${completedCount} completed tasks from server, merged ${newTasks} new tasks`);
+            } else {
+                const error = `Failed to fetch completed tasks: ${completedResult.reason || 'Unknown error'}`;
+                console.error('❌ [Stats Sync]', error);
+                errors.push(error);
             }
 
             // Get work sessions from server for today
+            console.log('🔄 [Stats Sync] Fetching work sessions from server...');
             const sessionsResult = await this.getWorkSessionsFromServer(today);
+
             if (sessionsResult.success) {
-                this.mergeWorkSessions(sessionsResult.workSessions);
-                console.log(`Merged ${sessionsResult.workSessions.length} work sessions from server`);
+                const beforeCount = this.workSessions.length;
+                this.mergeWorkSessions(sessionsResult.workSessions || []);
+                const afterCount = this.workSessions.length;
+                const newSessions = afterCount - beforeCount;
+                sessionsCount = sessionsResult.workSessions?.length || 0;
+                console.log(`✅ [Stats Sync] Received ${sessionsCount} work sessions from server, merged ${newSessions} new sessions`);
+            } else {
+                const error = `Failed to fetch work sessions: ${sessionsResult.reason || 'Unknown error'}`;
+                console.error('❌ [Stats Sync]', error);
+                errors.push(error);
             }
 
             // Update stats display
             this.updateStats();
+            console.log('✅ [Stats Sync] Stats display updated');
+
+            // Store last successful sync time
+            this.lastStatsSyncTime = new Date().toISOString();
+            this.saveData();
+
+            // Update stats sync status indicator
+            if (errors.length === 0) {
+                this.statsSyncText.textContent = 'Synced';
+                const now = new Date().toLocaleTimeString();
+                this.statsSyncLastTime.textContent = `Last synced: ${now}`;
+            } else {
+                this.statsSyncText.textContent = 'Partial sync';
+            }
+
+            if (showUserFeedback) {
+                if (errors.length === 0) {
+                    alert(`✅ Stats Sync Successful!\n\nCompleted Tasks: ${completedCount}\nWork Sessions: ${sessionsCount}\n\nYour stats are now up to date.`);
+                } else {
+                    alert(`⚠️ Stats Sync Partial Success\n\nSome errors occurred:\n${errors.join('\n')}\n\nPlease check console for details.`);
+                }
+            }
+
+            return {
+                success: errors.length === 0,
+                completedCount,
+                sessionsCount,
+                errors
+            };
+
         } catch (error) {
-            console.error('Error refreshing today\'s stats:', error);
+            const errorMessage = `Error refreshing stats: ${error.message}`;
+            console.error('❌ [Stats Sync]', errorMessage, error);
+
+            // Update stats sync status indicator
+            this.statsSyncText.textContent = 'Failed';
+
+            if (showUserFeedback) {
+                alert(`❌ Stats Sync Failed\n\n${error.message}\n\nPossible causes:\n• Google Apps Script not deployed\n• Incorrect webhook URL\n• Network connection issue\n• Script needs to be updated to version 3\n\nCheck browser console for details.`);
+            }
+
+            return { success: false, reason: error.message, error };
         }
     }
 
@@ -1869,6 +1992,8 @@ class PomodoroTimer {
                 new Date(b.completedAt) - new Date(a.completedAt)
             );
             console.log(`Added ${addedCount} completed tasks from server`);
+            // Persist changes to localStorage
+            this.saveData();
         }
     }
 
@@ -1892,6 +2017,8 @@ class PomodoroTimer {
                 new Date(b.completedAt) - new Date(a.completedAt)
             );
             console.log(`Added ${addedCount} work sessions from server`);
+            // Persist changes to localStorage
+            this.saveData();
         }
     }
 
@@ -2259,6 +2386,28 @@ class PomodoroTimer {
         // Perform both task sync and activity sync
         await this.performFullSync();
         await this.syncTodayData();
+    }
+
+    async manualRefreshStats() {
+        if (!this.googleSheetsWebhook) {
+            alert('❌ No webhook URL configured!\nPlease add your Google Apps Script webhook URL in settings to enable stats sync.');
+            return;
+        }
+
+        // Update status indicator
+        this.statsSyncText.textContent = 'Syncing...';
+
+        // Call refreshTodayStats with user feedback enabled
+        const result = await this.refreshTodayStats(true);
+
+        // Update status based on result
+        if (result && result.success) {
+            this.statsSyncText.textContent = 'Synced';
+            const now = new Date().toLocaleTimeString();
+            this.statsSyncLastTime.textContent = `Last synced: ${now}`;
+        } else {
+            this.statsSyncText.textContent = 'Failed';
+        }
     }
 
     startPeriodicSync() {

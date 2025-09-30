@@ -77,6 +77,9 @@ function doPost(e) {
       case 'get_work_sessions':
         response = getWorkSessions(data);
         break;
+      case 'get_version':
+        response = getVersion();
+        break;
       default:
         response = { success: false, error: 'Unknown action: ' + action };
     }
@@ -687,4 +690,20 @@ function findWorkSessionRow(sheet, sessionId) {
 
   const index = ids.findIndex(id => id == sessionId);
   return index === -1 ? -1 : index + 2;
+}
+
+// Get version information
+function getVersion() {
+  return {
+    success: true,
+    version: TASK_SCHEMA_VERSION,
+    versionName: '3.0.0-stats-sync',
+    features: [
+      'UUID-based task IDs',
+      'Version-based conflict resolution',
+      'Cross-device stats sync',
+      'Completed tasks sync',
+      'Work sessions sync'
+    ]
+  };
 }

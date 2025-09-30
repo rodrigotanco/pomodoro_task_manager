@@ -114,12 +114,18 @@
                 <div class="report-actions">
                     <button id="sendReportBtn" class="btn-secondary">📧 Send Report Now</button>
                     <button id="syncNowBtn" class="btn-secondary">🔄 Sync Now</button>
+                    <button id="refreshStatsBtn" class="btn-secondary">📊 Refresh Stats Now</button>
                 </div>
                 <div class="sync-status">
                     <div id="syncStatusIndicator" class="sync-indicator">
                         <span id="syncStatusIcon">⚪</span>
                         <span id="syncStatusText">Ready to sync</span>
                         <span id="syncLastTime" class="sync-time"></span>
+                    </div>
+                    <div id="statsSyncStatus" class="sync-indicator stats-sync">
+                        <span>📊 Stats: </span>
+                        <span id="statsSyncText">Not synced</span>
+                        <span id="statsSyncLastTime" class="sync-time"></span>
                     </div>
                 </div>
             </div>

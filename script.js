@@ -1331,8 +1331,11 @@ class PomodoroTimer {
 
         if (this.tasks.length === 0) {
             this.tasksList.innerHTML = '<div class="empty-state">No tasks yet. Add one above!</div>';
+            this.bulkSelectToggle.style.display = 'none';
             return;
         }
+
+        this.bulkSelectToggle.style.display = 'inline-block';
 
         this.tasks.forEach(task => {
             const taskElement = document.createElement('div');

@@ -7,19 +7,68 @@ function generateUUID() {
     });
 }
 
+// Get today's date in UTC format (YYYY-MM-DD) for consistent cross-timezone comparisons
+function getTodayUTC() {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(now.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+// Get date in UTC format (YYYY-MM-DD) from ISO timestamp
+function getDateUTC(isoString) {
+    const date = new Date(isoString);
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 // SyncQueue class: Manages sync operations with debouncing to prevent race conditions
 class SyncQueue {
-    constructor(processor, debounceMs = 500) {
+    constructor(processor, debounceMs = 500, storageKey = 'pomodoroSyncQueue') {
         this.queue = [];
         this.isProcessing = false;
         this.debounceTimer = null;
         this.processor = processor; // Function that processes queued operations
         this.debounceMs = debounceMs;
+        this.storageKey = storageKey;
+
+        // Load persisted queue from localStorage
+        this.loadQueue();
+    }
+
+    loadQueue() {
+        try {
+            const savedQueue = localStorage.getItem(this.storageKey);
+            if (savedQueue) {
+                this.queue = JSON.parse(savedQueue);
+                console.log(`SyncQueue: Loaded ${this.queue.length} persisted operations from localStorage`);
+
+                // Process loaded queue if it has items
+                if (this.queue.length > 0) {
+                    this.scheduleProcessing();
+                }
+            }
+        } catch (error) {
+            console.error('SyncQueue: Error loading persisted queue:', error);
+            this.queue = [];
+        }
+    }
+
+    saveQueue() {
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(this.queue));
+        } catch (error) {
+            console.error('SyncQueue: Error persisting queue:', error);
+        }
     }
 
     enqueue(operation) {
         console.log('SyncQueue: Enqueuing operation:', operation.type, operation.data?.id || operation.data?.taskId);
         this.queue.push(operation);
+        this.saveQueue(); // Persist to localStorage
         this.scheduleProcessing();
     }
 
@@ -46,6 +95,7 @@ class SyncQueue {
         // Get all queued operations and clear the queue
         const operations = [...this.queue];
         this.queue = [];
+        this.saveQueue(); // Persist cleared queue
 
         try {
             // Process batch of operations
@@ -65,6 +115,7 @@ class SyncQueue {
 
     clear() {
         this.queue = [];
+        this.saveQueue(); // Persist cleared queue
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = null;
@@ -122,7 +173,13 @@ class PomodoroTimer {
         // Device identification and sync management
         this.deviceId = this.generateDeviceId();
         this.lastSyncTime = null;
-        this.syncInProgress = false;
+        // Granular sync locks to prevent one sync from blocking others
+        this.syncLocks = {
+            tasks: false,
+            stats: false,
+            archived: false,
+            full: false
+        };
         this.syncTimer = null;
         this.deletedTaskIds = new Map(); // Track recently deleted/completed task IDs with timestamps
 
@@ -1241,6 +1298,7 @@ class PomodoroTimer {
             task.completedAt = now;
             task.lastModified = now;
             task.deviceId = this.deviceId;
+            task.version = (task.version || 1) + 1;  // Increment version on modification
 
             this.completedTasks.push(task);
             this.tasks.splice(taskIndex, 1);
@@ -1262,11 +1320,14 @@ class PomodoroTimer {
                     }
                 });
 
-            // Also remove from server tasks (since it's completed and moved to completedTasks)
-            this.deleteTaskFromServer(taskId);
+            // Find if there's a recent work session for this task (within last 5 minutes)
+            const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+            const recentSession = this.workSessions
+                .filter(s => s.taskId === taskId && s.completedAt > fiveMinutesAgo)
+                .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0];
 
-            // Queue sync of completed task to Completed Tasks sheet
-            this.syncQueue.enqueue({ type: 'sync_completed_task', data: task });
+            // Use atomic complete_task action to prevent race condition
+            this.completeTaskAtomically(task, recentSession);
 
             // Clear selection if completed task was selected
             if (this.selectedTaskId === taskId) {
@@ -1279,6 +1340,35 @@ class PomodoroTimer {
             this.saveData();
             // Add activity ONCE for task completion
             this.addActivity(`✅ Completed task: ${task.text}`);
+        }
+    }
+
+    async completeTaskAtomically(task, workSession = null) {
+        if (!this.googleSheetsWebhook) {
+            console.log('No webhook configured - skipping atomic completion sync');
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        console.log('🔄 Completing task atomically:', task.text, workSession ? 'with work session' : 'without work session');
+
+        const data = {
+            action: 'complete_task',
+            task: task,
+            workSession: workSession,
+            deviceId: this.deviceId
+        };
+
+        try {
+            const result = await this.performApiCall(data);
+            if (result.success) {
+                console.log('✅ Task completed atomically on server:', task.text);
+            } else {
+                console.error('❌ Atomic completion failed:', result);
+            }
+            return result;
+        } catch (error) {
+            console.error('❌ Atomic completion error:', error);
+            return { success: false, reason: error.message };
         }
     }
 
@@ -1410,21 +1500,21 @@ class PomodoroTimer {
     }
 
     updateStats() {
-        const today = new Date().toDateString();
+        const today = getTodayUTC();
 
-        // Count today's completed tasks
+        // Count today's completed tasks (using UTC for consistency)
         const todayTasks = this.completedTasks.filter(task =>
-            new Date(task.completedAt).toDateString() === today
+            getDateUTC(task.completedAt) === today
         ).length;
 
-        // Count today's work sessions
+        // Count today's work sessions (using UTC for consistency)
         const todaySessions = this.workSessions.filter(session =>
-            new Date(session.completedAt).toDateString() === today
+            getDateUTC(session.completedAt) === today
         ).length;
 
-        // Calculate today's focus time
+        // Calculate today's focus time (using UTC for consistency)
         const todayFocusTime = this.workSessions
-            .filter(session => new Date(session.completedAt).toDateString() === today)
+            .filter(session => getDateUTC(session.completedAt) === today)
             .reduce((total, session) => total + session.duration, 0);
 
         this.todayTasksDisplay.textContent = todayTasks;
@@ -1903,44 +1993,73 @@ class PomodoroTimer {
     }
 
     async performFullSync() {
-        if (this.syncInProgress) {
-            console.log('Sync already in progress, skipping');
+        if (this.syncLocks.full) {
+            console.log('Full sync already in progress, skipping');
             return;
         }
 
-        this.syncInProgress = true;
+        this.syncLocks.full = true;
         this.updateSyncStatus('syncing');
 
         try {
-            // Get tasks from server
-            const serverResult = await this.getTasksFromServer();
-
-            if (serverResult.success) {
-                // Merge tasks with conflict resolution
-                const mergeResult = this.mergeTasks(serverResult.tasks);
-
-                // If there were changes, sync back to server
-                if (mergeResult.hasChanges) {
-                    await this.syncAllTasksToServer();
+            // Sync tasks (with separate lock)
+            if (!this.syncLocks.tasks) {
+                this.syncLocks.tasks = true;
+                try {
+                    const serverResult = await this.getTasksFromServer();
+                    if (serverResult.success) {
+                        const mergeResult = this.mergeTasks(serverResult.tasks);
+                        if (mergeResult.hasChanges) {
+                            await this.syncAllTasksToServer();
+                        }
+                    } else {
+                        console.error('Failed to get tasks from server:', serverResult.reason);
+                    }
+                } finally {
+                    this.syncLocks.tasks = false;
                 }
-
-                // Sync today's stats (completed tasks and work sessions)
-                await this.refreshTodayStats();
-
-                this.lastSyncTime = new Date().toISOString();
-                this.saveData();
-                this.updateSyncStatus('synced');
-
-                console.log('Full sync completed successfully');
-            } else {
-                console.error('Failed to get tasks from server:', serverResult.reason);
-                this.updateSyncStatus('error');
             }
+
+            // Sync stats (with separate lock, can run independently)
+            if (!this.syncLocks.stats) {
+                this.syncLocks.stats = true;
+                try {
+                    await this.refreshTodayStats();
+                } catch (error) {
+                    console.error('Stats sync error:', error);
+                } finally {
+                    this.syncLocks.stats = false;
+                }
+            }
+
+            // Sync archived tasks (with separate lock, can run independently)
+            if (!this.syncLocks.archived) {
+                this.syncLocks.archived = true;
+                try {
+                    const archivedResult = await this.getArchivedTasksFromServer();
+                    if (archivedResult.success) {
+                        this.mergeArchivedTasks(archivedResult.archivedTasks || []);
+                        console.log(`✅ Synced ${archivedResult.count || 0} archived tasks from server`);
+                    } else {
+                        console.log('📦 Archived tasks sync skipped:', archivedResult.reason);
+                    }
+                } catch (error) {
+                    console.error('Archived tasks sync error:', error);
+                } finally {
+                    this.syncLocks.archived = false;
+                }
+            }
+
+            this.lastSyncTime = new Date().toISOString();
+            this.saveData();
+            this.updateSyncStatus('synced');
+
+            console.log('Full sync completed successfully');
         } catch (error) {
             console.error('Full sync error:', error);
             this.updateSyncStatus('error');
         } finally {
-            this.syncInProgress = false;
+            this.syncLocks.full = false;
         }
     }
 
@@ -1954,7 +2073,7 @@ class PomodoroTimer {
             return { success: false, reason: 'no_webhook' };
         }
 
-        const today = new Date().toDateString();
+        const today = getTodayUTC();
         console.log('🔄 [Stats Sync] Starting sync for:', today);
 
         try {
@@ -2082,21 +2201,48 @@ class PomodoroTimer {
         const localMap = new Map(this.completedTasks.map(t => [t.id, t]));
 
         let addedCount = 0;
+        let updatedCount = 0;
 
-        // Add server tasks that aren't in local storage
+        // Add or update server tasks
         for (const serverTask of serverTasks) {
-            if (!localMap.has(serverTask.id)) {
+            const localTask = localMap.get(serverTask.id);
+
+            if (!localTask) {
+                // New task from server - add it
                 this.completedTasks.push(serverTask);
                 addedCount++;
+            } else {
+                // Task exists - check for conflicts using version and timestamp
+                const serverVersion = serverTask.version || 1;
+                const localVersion = localTask.version || 1;
+
+                if (serverVersion > localVersion) {
+                    // Server has newer version - update
+                    const index = this.completedTasks.findIndex(t => t.id === serverTask.id);
+                    this.completedTasks[index] = serverTask;
+                    updatedCount++;
+                    console.log(`Updated completed task from server (v${serverVersion} > v${localVersion}):`, serverTask.text);
+                } else if (serverVersion === localVersion) {
+                    // Same version - use timestamp
+                    const serverModified = new Date(serverTask.lastModified || serverTask.completedAt);
+                    const localModified = new Date(localTask.lastModified || localTask.completedAt);
+
+                    if (serverModified > localModified) {
+                        const index = this.completedTasks.findIndex(t => t.id === serverTask.id);
+                        this.completedTasks[index] = serverTask;
+                        updatedCount++;
+                        console.log(`Updated completed task from server (newer timestamp):`, serverTask.text);
+                    }
+                }
             }
         }
 
-        if (addedCount > 0) {
+        if (addedCount > 0 || updatedCount > 0) {
             // Sort by completion time (newest first)
             this.completedTasks.sort((a, b) =>
                 new Date(b.completedAt) - new Date(a.completedAt)
             );
-            console.log(`Added ${addedCount} completed tasks from server`);
+            console.log(`Stats merge: ${addedCount} added, ${updatedCount} updated completed tasks`);
             // Persist changes to localStorage
             this.saveData();
         }
@@ -2107,21 +2253,40 @@ class PomodoroTimer {
         const localMap = new Map(this.workSessions.map(s => [s.id, s]));
 
         let addedCount = 0;
+        let updatedCount = 0;
 
-        // Add server sessions that aren't in local storage
+        // Add or update server sessions
         for (const serverSession of serverSessions) {
-            if (!localMap.has(serverSession.id)) {
+            const localSession = localMap.get(serverSession.id);
+
+            if (!localSession) {
+                // New session from server - add it
                 this.workSessions.push(serverSession);
                 addedCount++;
+            } else {
+                // Session exists - check if server version is different
+                // Work sessions are usually immutable, but check for data corrections
+                const serverDuration = serverSession.duration;
+                const localDuration = localSession.duration;
+                const serverCompleted = new Date(serverSession.completedAt);
+                const localCompleted = new Date(localSession.completedAt);
+
+                // If server has different data, prefer server (assumes server is source of truth)
+                if (serverDuration !== localDuration || serverCompleted.getTime() !== localCompleted.getTime()) {
+                    const index = this.workSessions.findIndex(s => s.id === serverSession.id);
+                    this.workSessions[index] = serverSession;
+                    updatedCount++;
+                    console.log(`Updated work session from server (data correction):`, serverSession.id);
+                }
             }
         }
 
-        if (addedCount > 0) {
+        if (addedCount > 0 || updatedCount > 0) {
             // Sort by completion time (newest first)
             this.workSessions.sort((a, b) =>
                 new Date(b.completedAt) - new Date(a.completedAt)
             );
-            console.log(`Added ${addedCount} work sessions from server`);
+            console.log(`Stats merge: ${addedCount} added, ${updatedCount} updated work sessions`);
             // Persist changes to localStorage
             this.saveData();
         }
@@ -2516,7 +2681,7 @@ class PomodoroTimer {
     }
 
     async manualSync() {
-        if (this.syncInProgress) {
+        if (this.syncLocks.full) {
             console.log('Sync already in progress');
             return;
         }
@@ -2533,12 +2698,13 @@ class PomodoroTimer {
         // Also sync activity log
         await this.syncTodayData();
 
-        // Show success message with details
+        // Show success message with details (using UTC for consistency)
+        const today = getTodayUTC();
         const completedCount = this.completedTasks.filter(t =>
-            new Date(t.completedAt).toDateString() === new Date().toDateString()
+            getDateUTC(t.completedAt) === today
         ).length;
         const sessionsCount = this.workSessions.filter(s =>
-            new Date(s.completedAt).toDateString() === new Date().toDateString()
+            getDateUTC(s.completedAt) === today
         ).length;
 
         console.log(`✅ Manual sync completed! Today's stats: ${completedCount} tasks, ${sessionsCount} sessions`);
@@ -2552,7 +2718,7 @@ class PomodoroTimer {
 
         // Schedule periodic sync every 60 seconds
         this.syncTimer = setInterval(() => {
-            if (!this.syncInProgress) {
+            if (!this.syncLocks.full) {
                 this.performFullSync();
             }
         }, PomodoroTimer.SYNC_INTERVAL);
@@ -2621,6 +2787,7 @@ class PomodoroTimer {
         const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => op.data);
         const syncCompletedTasks = operations.filter(op => op.type === 'sync_completed_task').map(op => op.data);
         const syncWorkSessions = operations.filter(op => op.type === 'sync_work_session').map(op => op.data);
+        const syncArchivedTasks = operations.filter(op => op.type === 'sync_archived_task').map(op => op.data);
 
         // Sync all active tasks in one batch
         if (syncTasks.length > 0) {
@@ -2649,6 +2816,16 @@ class PomodoroTimer {
                 await this.syncWorkSessionsToServer(syncWorkSessions);
             } catch (error) {
                 console.error('Error syncing work sessions:', error);
+            }
+        }
+
+        // Sync archived tasks in one batch
+        if (syncArchivedTasks.length > 0) {
+            console.log(`Syncing ${syncArchivedTasks.length} archived tasks...`);
+            try {
+                await this.syncArchivedTasksToServer(syncArchivedTasks);
+            } catch (error) {
+                console.error('Error syncing archived tasks:', error);
             }
         }
 
@@ -2688,6 +2865,58 @@ class PomodoroTimer {
         };
 
         return await this.performApiCall(data);
+    }
+
+    async syncArchivedTasksToServer(archivedTasks) {
+        if (!this.googleSheetsWebhook || archivedTasks.length === 0) {
+            return { success: false, reason: 'No webhook configured or no tasks to sync' };
+        }
+
+        const data = {
+            action: 'sync_archived_tasks',
+            archivedTasks: archivedTasks,
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
+    async getArchivedTasksFromServer() {
+        if (!this.googleSheetsWebhook) {
+            return { success: false, reason: 'No webhook configured' };
+        }
+
+        const data = {
+            action: 'get_archived_tasks',
+            deviceId: this.deviceId
+        };
+
+        return await this.performApiCall(data);
+    }
+
+    mergeArchivedTasks(serverTasks) {
+        // Create map of local tasks by ID for fast lookup
+        const localMap = new Map(this.archivedTasks.map(t => [t.id, t]));
+
+        let addedCount = 0;
+
+        // Add server tasks that aren't in local storage
+        for (const serverTask of serverTasks) {
+            if (!localMap.has(serverTask.id)) {
+                this.archivedTasks.push(serverTask);
+                addedCount++;
+            }
+        }
+
+        if (addedCount > 0) {
+            // Sort by archive time (newest first)
+            this.archivedTasks.sort((a, b) =>
+                new Date(b.archivedAt) - new Date(a.archivedAt)
+            );
+            console.log(`Added ${addedCount} archived tasks from server`);
+            // Persist changes to localStorage
+            this.saveData();
+        }
     }
 
     // Bulk Selection Methods
@@ -2810,10 +3039,16 @@ class PomodoroTimer {
                 };
                 this.archivedTasks.push(archivedTask);
 
-                // Add to deleted tasks tracking (so it syncs deletion to server)
+                // Add to deleted tasks tracking (prevents re-adding from server)
                 this.deletedTaskIds.set(taskId, Date.now());
 
-                // Queue delete sync (removes from active tasks on server)
+                // Queue archived task sync to server
+                this.syncQueue.enqueue({
+                    type: 'sync_archived_task',
+                    data: archivedTask
+                });
+
+                // Also delete from active tasks sheet on server
                 this.syncQueue.enqueue({
                     type: 'delete_task',
                     data: { taskId, timestamp: Date.now() }

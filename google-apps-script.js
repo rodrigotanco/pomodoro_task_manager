@@ -24,6 +24,7 @@ const ACTIVITY_SHEET_NAME = 'Activity Log';
 const TASKS_SHEET_NAME = 'Tasks';
 const COMPLETED_TASKS_SHEET_NAME = 'Completed Tasks';
 const WORK_SESSIONS_SHEET_NAME = 'Work Sessions';
+const ARCHIVED_TASKS_SHEET_NAME = 'Archived Tasks';
 const SETTINGS_SHEET_NAME = 'Settings';
 
 // Task schema version - increment when changing task structure
@@ -93,6 +94,9 @@ function doPost(e) {
       case 'delete_task':
         response = deleteTask(data);
         break;
+      case 'complete_task':
+        response = completeTask(data);
+        break;
       case 'sync_completed_tasks':
         response = syncCompletedTasks(data);
         break;
@@ -104,6 +108,12 @@ function doPost(e) {
         break;
       case 'get_work_sessions':
         response = getWorkSessions(data);
+        break;
+      case 'sync_archived_tasks':
+        response = syncArchivedTasks(data);
+        break;
+      case 'get_archived_tasks':
+        response = getArchivedTasks(data);
         break;
       case 'get_version':
         response = getVersion();
@@ -395,6 +405,78 @@ function deleteTask(data) {
   };
 }
 
+// Atomically complete a task: delete from active tasks and add to completed tasks
+function completeTask(data) {
+  console.log('completeTask called with data:', JSON.stringify(data));
+
+  const task = data.task;
+  const workSession = data.workSession;
+  const deviceId = data.deviceId || 'unknown';
+  const timestamp = new Date().toISOString();
+
+  // Step 1: Delete from active tasks sheet
+  const tasksSheet = getOrCreateSheet(TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const rowIndex = findTaskRow(tasksSheet, task.id);
+  if (rowIndex !== -1) {
+    tasksSheet.deleteRow(rowIndex);
+    console.log('Deleted task from active tasks:', task.text);
+  }
+
+  // Step 2: Add to completed tasks sheet
+  const completedSheet = getOrCreateSheet(COMPLETED_TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
+  ]);
+
+  const existingCompletedRow = findCompletedTaskRow(completedSheet, task.id);
+  if (existingCompletedRow === -1) {
+    const nextRow = completedSheet.getLastRow() + 1;
+    completedSheet.getRange(nextRow, 1, 1, 9).setValues([[
+      task.id,
+      task.text,
+      true,
+      task.version || 1,
+      task.createdAt,
+      task.completedAt || timestamp,
+      timestamp,
+      deviceId,
+      'synced'
+    ]]);
+    console.log('Added to completed tasks:', task.text);
+  }
+
+  // Step 3: Add work session if provided
+  if (workSession) {
+    const sessionsSheet = getOrCreateSheet(WORK_SESSIONS_SHEET_NAME, [
+      'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status'
+    ]);
+
+    const existingSessionRow = findWorkSessionRow(sessionsSheet, workSession.id);
+    if (existingSessionRow === -1) {
+      const nextRow = sessionsSheet.getLastRow() + 1;
+      sessionsSheet.getRange(nextRow, 1, 1, 7).setValues([[
+        workSession.id,
+        workSession.taskId || '',
+        workSession.taskText || task.text,
+        Math.round(workSession.duration / 60),
+        workSession.completedAt || timestamp,
+        deviceId,
+        'synced'
+      ]]);
+      console.log('Added work session:', workSession.id);
+    }
+  }
+
+  return {
+    success: true,
+    message: 'Task completed atomically',
+    taskId: task.id,
+    taskText: task.text
+  };
+}
+
 function findTaskRow(sheet, taskId) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return -1;
@@ -493,9 +575,9 @@ function doGet(e) {
   const response = {
     status: 'Pomodoro Google Apps Script with Full Sync is running',
     timestamp: new Date().toISOString(),
-    supportedActions: ['log_activity', 'sync_tasks', 'get_tasks', 'update_task', 'delete_task', 'sync_completed_tasks', 'get_completed_tasks', 'sync_work_sessions', 'get_work_sessions'],
+    supportedActions: ['log_activity', 'sync_tasks', 'get_tasks', 'update_task', 'delete_task', 'complete_task', 'sync_completed_tasks', 'get_completed_tasks', 'sync_work_sessions', 'get_work_sessions', 'sync_archived_tasks', 'get_archived_tasks'],
     jsonpActions: ['log_activity', 'get_tasks', 'sync_tasks'],
-    version: '3.0.0-with-stats-sync',
+    version: '3.0.0-with-archived-sync',
     schemaVersion: TASK_SCHEMA_VERSION
   };
 
@@ -569,7 +651,7 @@ function getCompletedTasks(data) {
     'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
-  const filterDate = data.date; // Optional: filter by date (format: "Mon Jan 15 2024")
+  const filterDate = data.date; // Optional: filter by date (format: "YYYY-MM-DD" in UTC)
   const lastRow = sheet.getLastRow();
 
   console.log('Completed tasks sheet last row:', lastRow);
@@ -596,11 +678,12 @@ function getCompletedTasks(data) {
       syncStatus: row[8]
     }));
 
-  // Filter by date if provided
+  // Filter by date if provided (using UTC format YYYY-MM-DD for consistency)
   if (filterDate) {
     tasks = tasks.filter(task => {
-      const taskDate = new Date(task.completedAt).toDateString();
-      return taskDate === filterDate;
+      const taskDate = new Date(task.completedAt);
+      const taskDateUTC = `${taskDate.getUTCFullYear()}-${String(taskDate.getUTCMonth() + 1).padStart(2, '0')}-${String(taskDate.getUTCDate()).padStart(2, '0')}`;
+      return taskDateUTC === filterDate;
     });
     console.log(`Filtered to ${tasks.length} tasks for date: ${filterDate}`);
   }
@@ -676,7 +759,7 @@ function getWorkSessions(data) {
     'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status'
   ]);
 
-  const filterDate = data.date; // Optional: filter by date
+  const filterDate = data.date; // Optional: filter by date (format: "YYYY-MM-DD" in UTC)
   const lastRow = sheet.getLastRow();
 
   console.log('Work sessions sheet last row:', lastRow);
@@ -701,11 +784,12 @@ function getWorkSessions(data) {
       syncStatus: row[6]
     }));
 
-  // Filter by date if provided
+  // Filter by date if provided (using UTC format YYYY-MM-DD for consistency)
   if (filterDate) {
     sessions = sessions.filter(session => {
-      const sessionDate = new Date(session.completedAt).toDateString();
-      return sessionDate === filterDate;
+      const sessionDate = new Date(session.completedAt);
+      const sessionDateUTC = `${sessionDate.getUTCFullYear()}-${String(sessionDate.getUTCMonth() + 1).padStart(2, '0')}-${String(sessionDate.getUTCDate()).padStart(2, '0')}`;
+      return sessionDateUTC === filterDate;
     });
     console.log(`Filtered to ${sessions.length} sessions for date: ${filterDate}`);
   }
@@ -728,6 +812,105 @@ function findWorkSessionRow(sheet, sessionId) {
   return index === -1 ? -1 : index + 2;
 }
 
+// Archived Tasks synchronization functions
+function syncArchivedTasks(data) {
+  console.log('syncArchivedTasks called with data:', JSON.stringify(data));
+
+  const sheet = getOrCreateSheet(ARCHIVED_TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Archived At', 'Device ID', 'Sync Status'
+  ]);
+
+  const tasks = data.archivedTasks || [];
+  const deviceId = data.deviceId || 'unknown';
+  const timestamp = new Date().toISOString();
+
+  console.log('Processing', tasks.length, 'archived tasks for device:', deviceId);
+
+  let syncedCount = 0;
+
+  for (const task of tasks) {
+    // Check if task already exists
+    const existingRowIndex = findArchivedTaskRow(sheet, task.id);
+
+    if (existingRowIndex === -1) {
+      // New archived task - add it
+      const nextRow = sheet.getLastRow() + 1;
+      sheet.getRange(nextRow, 1, 1, 9).setValues([[
+        task.id,
+        task.text,
+        task.completed || false,
+        task.version || 1,
+        task.createdAt,
+        task.completedAt || '',
+        task.archivedAt || timestamp,
+        deviceId,
+        'synced'
+      ]]);
+      syncedCount++;
+      console.log('Added archived task to sheet:', task.text);
+    } else {
+      console.log('Archived task already exists:', task.text);
+    }
+  }
+
+  return {
+    success: true,
+    message: `Synced ${syncedCount} archived tasks`,
+    syncedCount
+  };
+}
+
+function getArchivedTasks(data) {
+  console.log('getArchivedTasks called with data:', JSON.stringify(data));
+
+  const sheet = getOrCreateSheet(ARCHIVED_TASKS_SHEET_NAME, [
+    'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Archived At', 'Device ID', 'Sync Status'
+  ]);
+
+  const lastRow = sheet.getLastRow();
+
+  console.log('Archived tasks sheet last row:', lastRow);
+
+  if (lastRow <= 1) {
+    console.log('No archived tasks found in sheet');
+    return { success: true, archivedTasks: [] };
+  }
+
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 9);
+  const values = dataRange.getValues();
+
+  const tasks = values
+    .filter(row => row[0]) // Filter out empty rows
+    .map(row => ({
+      id: row[0],
+      text: row[1],
+      completed: row[2],
+      version: row[3] || 1,
+      createdAt: row[4],
+      completedAt: row[5],
+      archivedAt: row[6],
+      deviceId: row[7],
+      syncStatus: row[8]
+    }));
+
+  return {
+    success: true,
+    archivedTasks: tasks,
+    count: tasks.length
+  };
+}
+
+function findArchivedTaskRow(sheet, taskId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return -1;
+
+  const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  const ids = idRange.getValues().flat();
+
+  const index = ids.findIndex(id => id == taskId);
+  return index === -1 ? -1 : index + 2;
+}
+
 // Get version information
 function getVersion() {
   return {
@@ -739,7 +922,8 @@ function getVersion() {
       'Version-based conflict resolution',
       'Cross-device stats sync',
       'Completed tasks sync',
-      'Work sessions sync'
+      'Work sessions sync',
+      'Archived tasks sync'
     ]
   };
 }

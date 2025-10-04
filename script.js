@@ -2762,6 +2762,7 @@ class PomodoroTimer {
         this.addActivity(`🗑️ Bulk deleted ${count} task${count > 1 ? 's' : ''}`);
         this.exitBulkSelectionMode();
         this.saveData();
+        this.saveDeletedTaskIds();
         this.renderTasks();
     }
 
@@ -2801,6 +2802,7 @@ class PomodoroTimer {
         this.addActivity(`📦 Bulk archived ${count} task${count > 1 ? 's' : ''}`);
         this.exitBulkSelectionMode();
         this.saveData();
+        this.saveDeletedTaskIds();
         this.renderTasks();
     }
 

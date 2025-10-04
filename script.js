@@ -245,7 +245,7 @@ class PomodoroTimer {
 
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
-        this.syncNowBtn.addEventListener('click', () => this.manualSync());
+        this.syncNowBtn.addEventListener('click', () => this.handleSyncButtonClick());
 
         // Bulk selection events
         this.bulkSelectToggle.addEventListener('click', () => this.toggleBulkSelection());
@@ -604,6 +604,7 @@ class PomodoroTimer {
         this.renderTasks();
         this.updateStats();
         this.updateActivityLog();
+        this.updateSyncButton();
     }
 
     saveData() {
@@ -644,6 +645,7 @@ class PomodoroTimer {
         }
 
         this.saveData();
+        this.updateSyncButton();
         this.settingsPanel.classList.add('hidden');
         this.addActivity('⚙️ Settings updated');
     }
@@ -2490,6 +2492,26 @@ class PomodoroTimer {
         // Additional debugging info
         if (this.deletedTaskIds.size > 0) {
             console.log('📋 Deleted task IDs being tracked:', Array.from(this.deletedTaskIds));
+        }
+    }
+
+    handleSyncButtonClick() {
+        if (!this.googleSheetsWebhook) {
+            // No webhook configured, show setup instructions
+            this.showSetupModal();
+        } else {
+            // Webhook configured, perform sync
+            this.manualSync();
+        }
+    }
+
+    updateSyncButton() {
+        if (!this.googleSheetsWebhook) {
+            this.syncNowBtn.textContent = '⚙️ Sync Setup';
+            this.syncNowBtn.title = 'Configure Google Sheets sync';
+        } else {
+            this.syncNowBtn.textContent = '🔄 Sync Now';
+            this.syncNowBtn.title = 'Manually sync with Google Sheets';
         }
     }
 

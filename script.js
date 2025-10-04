@@ -126,6 +126,11 @@ class PomodoroTimer {
         this.syncTimer = null;
         this.deletedTaskIds = new Map(); // Track recently deleted/completed task IDs with timestamps
 
+        // Bulk selection state
+        this.bulkSelectionMode = false;
+        this.selectedTaskIds = new Set();
+        this.archivedTasks = [];
+
         // Date change detection
         this.currentDate = new Date().toDateString();
         this.midnightResetTimer = null;
@@ -205,6 +210,15 @@ class PomodoroTimer {
         this.statsSyncText = document.getElementById('statsSyncText');
         this.statsSyncLastTime = document.getElementById('statsSyncLastTime');
 
+        // Bulk selection elements
+        this.bulkSelectToggle = document.getElementById('bulkSelectToggle');
+        this.bulkActionsBar = document.getElementById('bulkActionsBar');
+        this.selectAllTasks = document.getElementById('selectAllTasks');
+        this.selectedCount = document.getElementById('selectedCount');
+        this.bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+        this.bulkArchiveBtn = document.getElementById('bulkArchiveBtn');
+        this.cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
+
         // Audio element
         this.alarmSound = document.getElementById('alarmSound');
     }
@@ -232,6 +246,13 @@ class PomodoroTimer {
         // Reports and sync
         this.sendReportBtn.addEventListener('click', () => this.sendReport());
         this.syncNowBtn.addEventListener('click', () => this.manualSync());
+
+        // Bulk selection events
+        this.bulkSelectToggle.addEventListener('click', () => this.toggleBulkSelection());
+        this.selectAllTasks.addEventListener('change', (e) => this.handleSelectAll(e.target.checked));
+        this.bulkDeleteBtn.addEventListener('click', () => this.bulkDeleteTasks());
+        this.bulkArchiveBtn.addEventListener('click', () => this.bulkArchiveTasks());
+        this.cancelSelectionBtn.addEventListener('click', () => this.cancelBulkSelection());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -557,6 +578,7 @@ class PomodoroTimer {
             }));
             this.completedTasks = data.completedTasks || [];
             this.workSessions = data.workSessions || [];
+            this.archivedTasks = data.archivedTasks || [];
             this.sessionCount = data.sessionCount || 0;
             this.userEmail = data.userEmail || '';
             this.notificationsEnabled = data.notificationsEnabled !== undefined ? data.notificationsEnabled : true;
@@ -589,6 +611,7 @@ class PomodoroTimer {
             tasks: this.tasks,
             completedTasks: this.completedTasks,
             workSessions: this.workSessions,
+            archivedTasks: this.archivedTasks,
             sessionCount: this.sessionCount,
             userEmail: this.userEmail,
             notificationsEnabled: this.notificationsEnabled,
@@ -776,6 +799,43 @@ class PomodoroTimer {
     completeCurrentTask() {
         if (!this.isWorkSession || !this.selectedTaskId) {
             return;
+        }
+
+        // Calculate elapsed time and create work session
+        if (this.isRunning && this.startTime) {
+            const elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
+            const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60)); // Minimum 1 minute for display
+
+            const task = this.tasks.find(t => t.id === this.selectedTaskId);
+
+            // Create work session for ANY duration (no threshold)
+            const workSession = {
+                id: generateUUID(),
+                taskId: this.selectedTaskId,
+                taskText: task ? task.text : 'Unknown task',
+                duration: elapsedMinutes,  // Actual elapsed time
+                completedAt: new Date().toISOString()
+            };
+
+            console.log('✅ Creating work session:', workSession);
+
+            // Add to local storage
+            this.workSessions.push(workSession);
+
+            // Queue sync to Work Sessions sheet
+            this.syncQueue.enqueue({ type: 'sync_work_session', data: workSession });
+
+            // Log to Activity Log
+            this.syncToGoogleSheets('Work Session', workSession.taskText, elapsedMinutes)
+                .then(result => {
+                    if (result.success) {
+                        console.log('✅ Work session synced to Google Sheets:', workSession.taskText);
+                    }
+                });
+
+            // Update stats and save
+            this.updateStats();
+            this.saveData();
         }
 
         // Complete the current task
@@ -1269,17 +1329,46 @@ class PomodoroTimer {
     renderTasks() {
         this.tasksList.innerHTML = '';
 
+        if (this.tasks.length === 0) {
+            this.tasksList.innerHTML = '<div class="empty-state">No tasks yet. Add one above!</div>';
+            return;
+        }
+
         this.tasks.forEach(task => {
             const taskElement = document.createElement('div');
-            taskElement.className = `task-item ${task.id === this.selectedTaskId ? 'selected' : ''}`;
-            taskElement.onclick = () => this.selectTask(task.id);
+            const isSelected = this.selectedTaskIds.has(task.id);
+            let className = 'task-item';
 
-            // Create elements safely without innerHTML
+            if (this.bulkSelectionMode) {
+                className += ' selection-mode';
+                if (isSelected) {
+                    className += ' selected';
+                }
+            } else if (task.id === this.selectedTaskId) {
+                className += ' selected';
+            }
+
+            taskElement.className = className;
+            taskElement.dataset.taskId = task.id;
+
+            // Checkbox for bulk selection (visible only in selection mode)
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'task-checkbox';
+            checkbox.checked = isSelected;
+            checkbox.style.display = this.bulkSelectionMode ? 'inline-block' : 'none';
+            checkbox.onclick = (e) => {
+                e.stopPropagation();
+                this.handleTaskCheckbox(task.id, e.target.checked);
+            };
+
+            // Radio button for task selection (hidden in bulk mode)
             const radioInput = document.createElement('input');
             radioInput.type = 'radio';
             radioInput.className = 'task-radio';
             radioInput.checked = task.id === this.selectedTaskId;
             radioInput.readOnly = true;
+            radioInput.style.display = this.bulkSelectionMode ? 'none' : 'inline-block';
 
             const taskText = document.createElement('span');
             taskText.className = 'task-text';
@@ -1301,6 +1390,12 @@ class PomodoroTimer {
             taskActions.appendChild(completeBtn);
             taskActions.appendChild(deleteBtn);
 
+            // Only add click handler for task selection if NOT in bulk mode
+            if (!this.bulkSelectionMode) {
+                taskElement.onclick = () => this.selectTask(task.id);
+            }
+
+            taskElement.appendChild(checkbox);
             taskElement.appendChild(radioInput);
             taskElement.appendChild(taskText);
             taskElement.appendChild(taskActions);
@@ -2568,6 +2663,145 @@ class PomodoroTimer {
         };
 
         return await this.performApiCall(data);
+    }
+
+    // Bulk Selection Methods
+    toggleBulkSelection() {
+        this.bulkSelectionMode = !this.bulkSelectionMode;
+
+        if (this.bulkSelectionMode) {
+            this.enterBulkSelectionMode();
+        } else {
+            this.exitBulkSelectionMode();
+        }
+    }
+
+    enterBulkSelectionMode() {
+        this.bulkSelectToggle.classList.add('active');
+        this.bulkSelectToggle.textContent = '✖️ Cancel Selection';
+        this.bulkActionsBar.classList.remove('hidden');
+        this.selectedTaskIds.clear();
+        this.updateSelectedCount();
+        this.renderTasks();
+    }
+
+    exitBulkSelectionMode() {
+        this.bulkSelectionMode = false;
+        this.bulkSelectToggle.classList.remove('active');
+        this.bulkSelectToggle.textContent = '☑️ Select Tasks';
+        this.bulkActionsBar.classList.add('hidden');
+        this.selectedTaskIds.clear();
+        this.selectAllTasks.checked = false;
+        this.renderTasks();
+    }
+
+    cancelBulkSelection() {
+        this.exitBulkSelectionMode();
+    }
+
+    handleSelectAll(checked) {
+        if (checked) {
+            this.tasks.forEach(task => this.selectedTaskIds.add(task.id));
+        } else {
+            this.selectedTaskIds.clear();
+        }
+        this.updateSelectedCount();
+        this.renderTasks();
+    }
+
+    handleTaskCheckbox(taskId, checked) {
+        if (checked) {
+            this.selectedTaskIds.add(taskId);
+        } else {
+            this.selectedTaskIds.delete(taskId);
+        }
+
+        // Update "select all" checkbox state
+        this.selectAllTasks.checked = this.selectedTaskIds.size === this.tasks.length;
+        this.selectAllTasks.indeterminate = this.selectedTaskIds.size > 0 && this.selectedTaskIds.size < this.tasks.length;
+
+        this.updateSelectedCount();
+        this.renderTasks();
+    }
+
+    updateSelectedCount() {
+        const count = this.selectedTaskIds.size;
+        this.selectedCount.textContent = `${count} selected`;
+
+        // Disable bulk action buttons if nothing selected
+        this.bulkDeleteBtn.disabled = count === 0;
+        this.bulkArchiveBtn.disabled = count === 0;
+    }
+
+    bulkDeleteTasks() {
+        if (this.selectedTaskIds.size === 0) return;
+
+        const count = this.selectedTaskIds.size;
+        const confirmed = confirm(`Delete ${count} task${count > 1 ? 's' : ''}? This cannot be undone.`);
+
+        if (!confirmed) return;
+
+        // Delete each selected task
+        this.selectedTaskIds.forEach(taskId => {
+            const task = this.tasks.find(t => t.id === taskId);
+            if (task) {
+                // Add to deleted tasks tracking
+                this.deletedTaskIds.set(taskId, Date.now());
+
+                // Queue delete sync
+                this.syncQueue.enqueue({
+                    type: 'delete_task',
+                    data: { taskId, timestamp: Date.now() }
+                });
+            }
+        });
+
+        // Remove from tasks array
+        this.tasks = this.tasks.filter(t => !this.selectedTaskIds.has(t.id));
+
+        this.addActivity(`🗑️ Bulk deleted ${count} task${count > 1 ? 's' : ''}`);
+        this.exitBulkSelectionMode();
+        this.saveData();
+        this.renderTasks();
+    }
+
+    bulkArchiveTasks() {
+        if (this.selectedTaskIds.size === 0) return;
+
+        const count = this.selectedTaskIds.size;
+        const confirmed = confirm(`Archive ${count} task${count > 1 ? 's' : ''}? They will be moved to archived tasks.`);
+
+        if (!confirmed) return;
+
+        // Archive each selected task
+        this.selectedTaskIds.forEach(taskId => {
+            const task = this.tasks.find(t => t.id === taskId);
+            if (task) {
+                // Add to archived tasks
+                const archivedTask = {
+                    ...task,
+                    archivedAt: new Date().toISOString()
+                };
+                this.archivedTasks.push(archivedTask);
+
+                // Add to deleted tasks tracking (so it syncs deletion to server)
+                this.deletedTaskIds.set(taskId, Date.now());
+
+                // Queue delete sync (removes from active tasks on server)
+                this.syncQueue.enqueue({
+                    type: 'delete_task',
+                    data: { taskId, timestamp: Date.now() }
+                });
+            }
+        });
+
+        // Remove from active tasks array
+        this.tasks = this.tasks.filter(t => !this.selectedTaskIds.has(t.id));
+
+        this.addActivity(`📦 Bulk archived ${count} task${count > 1 ? 's' : ''}`);
+        this.exitBulkSelectionMode();
+        this.saveData();
+        this.renderTasks();
     }
 
     // Cleanup method to prevent memory leaks

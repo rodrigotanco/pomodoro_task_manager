@@ -92,6 +92,31 @@
                     <input type="text" id="taskInput" placeholder="Add a new task...">
                     <button id="addTaskBtn" class="btn-primary">Add</button>
                 </div>
+
+                <!-- Bulk Select Toggle Button -->
+                <button id="bulkSelectToggle" class="bulk-select-toggle">
+                    ☑️ Select Tasks
+                </button>
+
+                <!-- Bulk Actions Bar -->
+                <div id="bulkActionsBar" class="bulk-actions-bar hidden">
+                    <div class="bulk-actions-left">
+                        <input type="checkbox" id="selectAllTasks" class="task-checkbox-main">
+                        <span id="selectedCount">0 selected</span>
+                    </div>
+                    <div class="bulk-actions-right">
+                        <button id="bulkDeleteBtn" class="bulk-action-btn delete-btn" disabled>
+                            🗑️ Delete Selected
+                        </button>
+                        <button id="bulkArchiveBtn" class="bulk-action-btn archive-btn" disabled>
+                            📦 Archive Selected
+                        </button>
+                        <button id="cancelSelectionBtn" class="bulk-action-btn cancel-btn">
+                            ✖️ Cancel
+                        </button>
+                    </div>
+                </div>
+
                 <div id="tasksList" class="tasks-list"></div>
             </div>
 

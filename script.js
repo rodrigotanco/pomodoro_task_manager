@@ -170,11 +170,11 @@ class PomodoroTimer {
         this.userEmail = '';
         this.notificationsEnabled = true;
         this.soundSettings = {
-            'short-break': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
-            'long-break': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
-            'work-start': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
-            'task-complete': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
-            'daily-reset': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' }
+            'short-break': { file: null, volume: 100, duration: 5, fileName: null },
+            'long-break': { file: null, volume: 100, duration: 5, fileName: null },
+            'work-start': { file: null, volume: 100, duration: 5, fileName: null },
+            'task-complete': { file: null, volume: 100, duration: 5, fileName: null },
+            'daily-reset': { file: null, volume: 100, duration: 5, fileName: null }
         };
 
         // Sleep-resistant timer properties
@@ -774,7 +774,21 @@ class PomodoroTimer {
         }
 
         if (nameDisplay) {
-            nameDisplay.textContent = settings.fileName || (settings.file ? 'Custom sound' : 'Default alarm');
+            if (settings.fileName) {
+                nameDisplay.textContent = settings.fileName;
+            } else if (settings.file) {
+                nameDisplay.textContent = 'Custom sound';
+            } else {
+                // Show specific default sound based on type
+                const defaultSoundNames = {
+                    'short-break': 'Gong + "Take a break"',
+                    'long-break': 'Gong + "Take a break"',
+                    'work-start': 'Gong + "Start workout session"',
+                    'task-complete': 'Clapping sounds',
+                    'daily-reset': 'No sound (disabled)'
+                };
+                nameDisplay.textContent = defaultSoundNames[soundType] || 'Default alarm';
+            }
         }
     }
 
@@ -3681,6 +3695,7 @@ class AlertSoundManager {
         this.soundTypes = {
             'short-break': {
                 file: null,
+                defaultFile: 'sounds/short-break.mp3',
                 volume: 1.0,
                 duration: 5000,
                 enabled: true,
@@ -3688,6 +3703,7 @@ class AlertSoundManager {
             },
             'long-break': {
                 file: null,
+                defaultFile: 'sounds/long-break.mp3',
                 volume: 1.0,
                 duration: 5000,
                 enabled: true,
@@ -3695,6 +3711,7 @@ class AlertSoundManager {
             },
             'work-start': {
                 file: null,
+                defaultFile: 'sounds/work-start.mp3',
                 volume: 1.0,
                 duration: 5000,
                 enabled: true,
@@ -3702,6 +3719,7 @@ class AlertSoundManager {
             },
             'task-complete': {
                 file: null,
+                defaultFile: 'sounds/task-complete.mp3',
                 volume: 0.8,
                 duration: 3000,
                 enabled: true,
@@ -3709,9 +3727,10 @@ class AlertSoundManager {
             },
             'daily-reset': {
                 file: null,
+                defaultFile: null,
                 volume: 0.7,
                 duration: 3000,
-                enabled: true,
+                enabled: false,
                 name: 'Daily Reset Alert'
             }
         };
@@ -3873,15 +3892,25 @@ class AlertSoundManager {
             let audio;
 
             if (config.file) {
-                // Use custom sound
+                // Use custom sound uploaded by user
                 if (!this.audioCache[type]) {
                     audio = new Audio(config.file);
                     this.audioCache[type] = audio;
                 } else {
                     audio = this.audioCache[type];
                 }
+            } else if (config.defaultFile) {
+                // Use specific default sound for this alert type
+                const cacheKey = `default-${type}`;
+                if (!this.audioCache[cacheKey]) {
+                    audio = new Audio(config.defaultFile);
+                    this.audioCache[cacheKey] = audio;
+                } else {
+                    audio = this.audioCache[cacheKey];
+                }
+                audio.currentTime = 0;
             } else {
-                // Use default alarm sound
+                // Fallback to generic default alarm sound
                 audio = this.defaultAlarmSound;
                 audio.currentTime = 0;
             }

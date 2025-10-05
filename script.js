@@ -983,8 +983,10 @@ class PomodoroTimer {
 
             // Test button handler
             if (testBtn) {
-                testBtn.addEventListener('click', () => {
-                    window.alertSoundManager.testSound(type);
+                testBtn.addEventListener('click', async () => {
+                    const soundName = window.alertSoundManager.soundTypes[type]?.name || type;
+                    showToast(`Testing ${soundName} sound...`, 'info');
+                    await window.alertSoundManager.testSound(type);
                 });
             }
 
@@ -994,15 +996,36 @@ class PomodoroTimer {
                     try {
                         await window.alertSoundManager.resetToDefault(type);
 
+                        // Get default values for this sound type
+                        const defaultConfig = window.alertSoundManager.soundTypes[type];
+                        const defaultVolume = Math.round((defaultConfig.volume || 1.0) * 100);
+                        const defaultDuration = (defaultConfig.duration || 5000) / 1000;
+
+                        // Reset UI - filename
                         if (fileNameSpan) {
                             fileNameSpan.textContent = 'Default alarm';
                         }
 
+                        // Reset UI - file input
                         if (fileInput) {
                             fileInput.value = '';
                         }
 
-                        showToast(`${type} sound reset to default`, 'success');
+                        // Reset UI - volume slider and display
+                        if (volumeSlider) {
+                            volumeSlider.value = defaultVolume;
+                        }
+                        if (volumeValue) {
+                            volumeValue.textContent = `${defaultVolume}%`;
+                        }
+
+                        // Reset UI - duration input
+                        if (durationInput) {
+                            durationInput.value = defaultDuration;
+                        }
+
+                        const soundName = defaultConfig.name || type;
+                        showToast(`${soundName} reset to default`, 'success');
                     } catch (error) {
                         console.error('Error resetting sound:', error);
                         showToast('Error resetting sound', 'error');
@@ -3860,6 +3883,15 @@ class AlertSoundManager {
             throw new Error(`Invalid sound type: ${type}`);
         }
 
+        // Define default configurations for each sound type
+        const defaults = {
+            'short-break': { volume: 1.0, duration: 5000 },
+            'long-break': { volume: 1.0, duration: 5000 },
+            'work-start': { volume: 1.0, duration: 5000 },
+            'task-complete': { volume: 0.8, duration: 3000 },
+            'daily-reset': { volume: 0.7, duration: 3000 }
+        };
+
         try {
             await this.ensureDBReady();
 
@@ -3870,10 +3902,13 @@ class AlertSoundManager {
 
                 request.onsuccess = () => {
                     // Reset in-memory config to defaults
+                    const defaultConfig = defaults[type] || { volume: 1.0, duration: 5000 };
                     this.soundTypes[type] = {
                         ...this.soundTypes[type],
                         file: null,
-                        fileName: null
+                        fileName: null,
+                        volume: defaultConfig.volume,
+                        duration: defaultConfig.duration
                     };
 
                     // Clear audio cache

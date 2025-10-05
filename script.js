@@ -2087,10 +2087,10 @@ class PomodoroTimer {
 
             if (completedResult.success) {
                 const beforeCount = this.completedTasks.length;
-                this.mergeCompletedTasks(completedResult.completedTasks || []);
+                this.mergeCompletedTasks(completedResult.data.completedTasks || []);
                 const afterCount = this.completedTasks.length;
                 const newTasks = afterCount - beforeCount;
-                completedCount = completedResult.completedTasks?.length || 0;
+                completedCount = completedResult.data.completedTasks?.length || 0;
                 console.log(`✅ [Stats Sync] Received ${completedCount} completed tasks from server, merged ${newTasks} new tasks`);
             } else {
                 const error = `Failed to fetch completed tasks: ${completedResult.reason || 'Unknown error'}`;
@@ -2104,10 +2104,10 @@ class PomodoroTimer {
 
             if (sessionsResult.success) {
                 const beforeCount = this.workSessions.length;
-                this.mergeWorkSessions(sessionsResult.workSessions || []);
+                this.mergeWorkSessions(sessionsResult.data.workSessions || []);
                 const afterCount = this.workSessions.length;
                 const newSessions = afterCount - beforeCount;
-                sessionsCount = sessionsResult.workSessions?.length || 0;
+                sessionsCount = sessionsResult.data.workSessions?.length || 0;
                 console.log(`✅ [Stats Sync] Received ${sessionsCount} work sessions from server, merged ${newSessions} new sessions`);
             } else {
                 const error = `Failed to fetch work sessions: ${sessionsResult.reason || 'Unknown error'}`;

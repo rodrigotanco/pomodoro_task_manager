@@ -906,3 +906,454 @@ main {
 .task-item.selected:hover {
     background: linear-gradient(to right, #bbdefb 0%, #f5f5f5 100%);
 }
+
+/* ========================================
+   Settings Panel Sections
+   ======================================== */
+.settings-section {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid #e0e0e0;
+}
+
+.section-heading {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #ff6b6b;
+}
+
+/* ========================================
+   Sound Settings Styles
+   ======================================== */
+.sound-setting-item {
+    background: white;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 2px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.sound-setting-item:hover {
+    border-color: #ff6b6b;
+    box-shadow: 0 2px 8px rgba(255, 107, 107, 0.1);
+}
+
+.sound-label {
+    display: block;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+
+.sound-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.file-input {
+    display: none;
+}
+
+.file-label {
+    background: linear-gradient(135deg, #4ecdc4, #45b7d1);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.file-label:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+}
+
+.file-name {
+    flex: 1;
+    padding: 8px 12px;
+    background: #f0f0f0;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.sound-controls-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap: 10px;
+    margin-top: 10px;
+    align-items: end;
+}
+
+.control-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.control-item label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #666;
+}
+
+.volume-slider {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    outline: none;
+    background: linear-gradient(90deg, #e0e0e0 0%, #ff6b6b 100%);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ff6b6b;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 3px 6px rgba(255, 107, 107, 0.4);
+}
+
+.volume-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ff6b6b;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+}
+
+.volume-slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 3px 6px rgba(255, 107, 107, 0.4);
+}
+
+.volume-value {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #ff6b6b;
+    text-align: center;
+}
+
+.duration-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    transition: border-color 0.3s ease;
+}
+
+.duration-input:focus {
+    outline: none;
+    border-color: #ff6b6b;
+}
+
+.test-sound-btn,
+.reset-sound-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.test-sound-btn {
+    background: linear-gradient(135deg, #4ecdc4, #45b7d1);
+    color: white;
+}
+
+.test-sound-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+}
+
+.reset-sound-btn {
+    background: #f0f0f0;
+    color: #666;
+}
+
+.reset-sound-btn:hover {
+    background: #e0e0e0;
+    transform: translateY(-2px);
+}
+
+/* ========================================
+   Pomodoro Cycle Progress Indicator
+   ======================================== */
+.pomodoro-progress {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 0 10px 0;
+}
+
+.pomodoro-step {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.pomodoro-step:not(:last-child)::after {
+    content: '';
+    width: 30px;
+    height: 3px;
+    background: #e0e0e0;
+    position: absolute;
+    right: -35px;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: background 0.3s ease;
+}
+
+.pomodoro-step.completed:not(:last-child)::after {
+    background: linear-gradient(90deg, #ff6b6b, #4ecdc4);
+}
+
+.step-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #f0f0f0;
+    border: 3px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.pomodoro-step.completed .step-circle {
+    background: linear-gradient(135deg, #ff6b6b, #ff5252);
+    border-color: #ff6b6b;
+    color: white;
+}
+
+.pomodoro-step.completed .step-circle::after {
+    content: '✓';
+    position: absolute;
+    color: white;
+    font-size: 1.2rem;
+}
+
+.pomodoro-step.active .step-circle {
+    background: linear-gradient(135deg, #feca57, #ff9800);
+    border-color: #feca57;
+    animation: pulse 2s ease-in-out infinite;
+    box-shadow: 0 0 0 0 rgba(254, 202, 87, 0.7);
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(254, 202, 87, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(254, 202, 87, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(254, 202, 87, 0);
+    }
+}
+
+.pomodoro-text {
+    text-align: center;
+    font-size: 0.95rem;
+    color: #666;
+    font-weight: 500;
+    margin-bottom: 15px;
+}
+
+/* ========================================
+   Toast Notification System
+   ======================================== */
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 400px;
+}
+
+.toast {
+    background: white;
+    border-radius: 10px;
+    padding: 15px 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 300px;
+    animation: toastSlideIn 0.3s ease-out;
+    border-left: 4px solid #333;
+}
+
+@keyframes toastSlideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.toast.toast-fade-out {
+    animation: toastSlideOut 0.3s ease-out forwards;
+}
+
+@keyframes toastSlideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
+.toast-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.toast-content {
+    flex: 1;
+}
+
+.toast-message {
+    font-size: 0.95rem;
+    color: #333;
+    font-weight: 500;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.toast-close:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.toast.success {
+    border-left-color: #4caf50;
+}
+
+.toast.success .toast-icon {
+    color: #4caf50;
+}
+
+.toast.error {
+    border-left-color: #f44336;
+}
+
+.toast.error .toast-icon {
+    color: #f44336;
+}
+
+.toast.warning {
+    border-left-color: #ff9800;
+}
+
+.toast.warning .toast-icon {
+    color: #ff9800;
+}
+
+.toast.info {
+    border-left-color: #2196f3;
+}
+
+.toast.info .toast-icon {
+    color: #2196f3;
+}
+
+/* ========================================
+   Responsive Design Updates
+   ======================================== */
+@media (max-width: 768px) {
+    .sound-controls-row {
+        grid-template-columns: 1fr;
+    }
+
+    .pomodoro-progress {
+        gap: 5px;
+    }
+
+    .pomodoro-step:not(:last-child)::after {
+        width: 15px;
+        right: -17px;
+    }
+
+    .step-circle {
+        width: 35px;
+        height: 35px;
+        font-size: 0.8rem;
+    }
+
+    .toast-container {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        max-width: none;
+    }
+
+    .toast {
+        min-width: 0;
+    }
+
+    .settings-section {
+        padding: 15px;
+    }
+
+    .section-heading {
+        font-size: 1.1rem;
+    }
+}

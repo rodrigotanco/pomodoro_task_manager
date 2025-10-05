@@ -152,6 +152,11 @@ class PomodoroTimer {
     constructor() {
         this.workDuration = 25 * 60; // 25 minutes in seconds
         this.breakDuration = 5 * 60; // 5 minutes in seconds
+        this.longBreakDuration = 15 * 60; // 15 minutes in seconds
+        this.longBreakInterval = 4; // Long break after 4 pomodoros (0 to disable)
+        this.consecutiveWorkSessions = 0; // Track consecutive work sessions
+        this.completedPomodoros = 0; // Track completed pomodoros in current cycle
+        this.isLongBreak = false; // Track if current break is a long break
         this.currentDuration = this.workDuration;
         this.timeLeft = this.currentDuration;
         this.isRunning = false;
@@ -164,6 +169,10 @@ class PomodoroTimer {
         this.workSessions = [];
         this.userEmail = '';
         this.notificationsEnabled = true;
+        this.soundSettings = {
+            work: { file: null, volume: 100, duration: 5 },
+            break: { file: null, volume: 100, duration: 5 }
+        };
 
         // Sleep-resistant timer properties
         this.startTime = null;
@@ -219,6 +228,8 @@ class PomodoroTimer {
         // Timer elements
         this.timeDisplay = document.getElementById('timeLeft');
         this.sessionTypeDisplay = document.getElementById('sessionType');
+        this.pomodoroProgress = document.getElementById('pomodoroProgress');
+        this.pomodoroText = document.getElementById('pomodoroText');
         this.progressBar = document.getElementById('progress');
         this.startBtn = document.getElementById('startBtn');
         this.pauseBtn = document.getElementById('pauseBtn');
@@ -236,6 +247,8 @@ class PomodoroTimer {
         this.settingsPanel = document.getElementById('settingsPanel');
         this.workDurationInput = document.getElementById('workDuration');
         this.breakDurationInput = document.getElementById('breakDuration');
+        this.longBreakDurationInput = document.getElementById('longBreakDuration');
+        this.longBreakIntervalInput = document.getElementById('longBreakInterval');
         this.userEmailInput = document.getElementById('userEmail');
         this.enableNotificationsInput = document.getElementById('enableNotifications');
         this.googleSheetsWebhookInput = document.getElementById('googleSheetsWebhook');
@@ -278,6 +291,19 @@ class PomodoroTimer {
 
         // Audio element
         this.alarmSound = document.getElementById('alarmSound');
+
+        // Sound settings elements
+        this.workCompleteSoundInput = document.getElementById('workCompleteSound');
+        this.workCompleteSoundName = document.getElementById('workCompleteSoundName');
+        this.workCompleteVolumeInput = document.getElementById('workCompleteVolume');
+        this.workCompleteDurationInput = document.getElementById('workCompleteDuration');
+        this.breakCompleteSoundInput = document.getElementById('breakCompleteSound');
+        this.breakCompleteSoundName = document.getElementById('breakCompleteSoundName');
+        this.breakCompleteVolumeInput = document.getElementById('breakCompleteVolume');
+        this.breakCompleteDurationInput = document.getElementById('breakCompleteDuration');
+
+        // Pomodoro progress indicator
+        this.pomodoroProgress = document.getElementById('pomodoroProgress');
     }
 
     bindEvents() {
@@ -314,6 +340,9 @@ class PomodoroTimer {
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
 
+        // Sound settings UI
+        this.initSoundUI();
+
         // Add event listeners after ensuring elements exist
         if (this.closeModalBtn) {
             this.closeModalBtn.addEventListener('click', () => {
@@ -342,6 +371,9 @@ class PomodoroTimer {
         });
         // this.testConnectionBtn.addEventListener('click', () => this.testConnection()); // Commented out
 
+        // Sound settings event listeners
+        this.setupSoundEventListeners();
+
         // Auto-save data periodically
         this.autoSaveInterval = setInterval(() => this.saveData(), PomodoroTimer.AUTO_SAVE_INTERVAL);
 
@@ -355,6 +387,67 @@ class PomodoroTimer {
                 await this.syncQueue.flush();
             }
         });
+    }
+
+    setupSoundEventListeners() {
+        // Get all volume sliders and set up real-time display updates
+        const volumeSliders = document.querySelectorAll('.volume-slider');
+        volumeSliders.forEach(slider => {
+            slider.addEventListener('input', (e) => {
+                const volumeDisplay = e.target.nextElementSibling;
+                if (volumeDisplay && volumeDisplay.classList.contains('volume-value')) {
+                    volumeDisplay.textContent = `${e.target.value}%`;
+                }
+            });
+        });
+
+        // Set up file input handlers (if they exist in the new HTML)
+        if (this.workCompleteSoundInput) {
+            this.workCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'work'));
+        }
+        if (this.breakCompleteSoundInput) {
+            this.breakCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'break'));
+        }
+    }
+
+    handleSoundFileUpload(event, type) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Validate file size (< 5MB)
+        const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+        if (file.size > maxSize) {
+            showToast('File size must be less than 5MB', 'error');
+            event.target.value = ''; // Clear the input
+            return;
+        }
+
+        // Validate file type
+        if (!file.type.startsWith('audio/')) {
+            showToast('Please select an audio file', 'error');
+            event.target.value = ''; // Clear the input
+            return;
+        }
+
+        // Read file as data URL
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.soundSettings[type].file = e.target.result;
+
+            // Update filename display
+            const nameDisplay = type === 'work' ? this.workCompleteSoundName : this.breakCompleteSoundName;
+            if (nameDisplay) {
+                nameDisplay.textContent = file.name;
+            }
+
+            showToast(`Sound file uploaded: ${file.name}`, 'success');
+            this.saveData();
+        };
+        reader.onerror = () => {
+            showToast('Failed to read audio file', 'error');
+            event.target.value = ''; // Clear the input
+        };
+        reader.readAsDataURL(file);
     }
 
     async initializeSleepResistance() {
@@ -642,14 +735,44 @@ class PomodoroTimer {
             this.googleSheetsWebhook = data.googleSheetsWebhook || '';
             this.workDuration = data.workDuration || 25 * 60;
             this.breakDuration = data.breakDuration || 5 * 60;
+            this.longBreakDuration = data.longBreakDuration || 15 * 60;
+            this.longBreakInterval = data.longBreakInterval !== undefined ? data.longBreakInterval : 4;
+            this.consecutiveWorkSessions = data.consecutiveWorkSessions || 0;
+            this.isLongBreak = data.isLongBreak || false;
             this.lastSyncTime = data.lastSyncTime || null;
 
             // Update UI with loaded data
             this.workDurationInput.value = this.workDuration / 60;
             this.breakDurationInput.value = this.breakDuration / 60;
+            this.longBreakDurationInput.value = this.longBreakDuration / 60;
+            this.longBreakIntervalInput.value = this.longBreakInterval;
             this.userEmailInput.value = this.userEmail;
             this.enableNotificationsInput.checked = this.notificationsEnabled;
             this.googleSheetsWebhookInput.value = this.googleSheetsWebhook;
+
+            // Update sound settings UI if elements exist
+            if (this.workCompleteVolumeInput) {
+                this.workCompleteVolumeInput.value = this.soundSettings.work.volume;
+                const workVolumeDisplay = this.workCompleteVolumeInput.nextElementSibling;
+                if (workVolumeDisplay) workVolumeDisplay.textContent = `${this.soundSettings.work.volume}%`;
+            }
+            if (this.workCompleteDurationInput) {
+                this.workCompleteDurationInput.value = this.soundSettings.work.duration;
+            }
+            if (this.breakCompleteVolumeInput) {
+                this.breakCompleteVolumeInput.value = this.soundSettings.break.volume;
+                const breakVolumeDisplay = this.breakCompleteVolumeInput.nextElementSibling;
+                if (breakVolumeDisplay) breakVolumeDisplay.textContent = `${this.soundSettings.break.volume}%`;
+            }
+            if (this.breakCompleteDurationInput) {
+                this.breakCompleteDurationInput.value = this.soundSettings.break.duration;
+            }
+            if (this.workCompleteSoundName && this.soundSettings.work.file) {
+                this.workCompleteSoundName.textContent = 'Custom sound';
+            }
+            if (this.breakCompleteSoundName && this.soundSettings.break.file) {
+                this.breakCompleteSoundName.textContent = 'Custom sound';
+            }
         }
 
         // Load deleted task IDs
@@ -676,6 +799,12 @@ class PomodoroTimer {
             googleSheetsWebhook: this.googleSheetsWebhook,
             workDuration: this.workDuration,
             breakDuration: this.breakDuration,
+            longBreakDuration: this.longBreakDuration,
+            longBreakInterval: this.longBreakInterval,
+            consecutiveWorkSessions: this.consecutiveWorkSessions,
+            completedPomodoros: this.completedPomodoros,
+            isLongBreak: this.isLongBreak,
+            soundSettings: this.soundSettings,
             lastSave: new Date().toISOString(),
             lastSyncTime: this.lastSyncTime,
             deviceId: this.deviceId
@@ -690,13 +819,19 @@ class PomodoroTimer {
     saveSettings() {
         this.workDuration = parseInt(this.workDurationInput.value) * 60;
         this.breakDuration = parseInt(this.breakDurationInput.value) * 60;
+        this.longBreakDuration = parseInt(this.longBreakDurationInput.value) * 60;
+        this.longBreakInterval = parseInt(this.longBreakIntervalInput.value);
         this.userEmail = this.userEmailInput.value;
         this.notificationsEnabled = this.enableNotificationsInput.checked;
         this.googleSheetsWebhook = this.googleSheetsWebhookInput.value;
 
         // Update current session if not running
         if (!this.isRunning) {
-            this.currentDuration = this.isWorkSession ? this.workDuration : this.breakDuration;
+            if (this.isWorkSession) {
+                this.currentDuration = this.workDuration;
+            } else {
+                this.currentDuration = this.isLongBreak ? this.longBreakDuration : this.breakDuration;
+            }
             this.timeLeft = this.currentDuration;
             this.updateDisplay();
         }
@@ -705,6 +840,122 @@ class PomodoroTimer {
         this.updateSyncButton();
         this.settingsPanel.classList.add('hidden');
         this.addActivity('⚙️ Settings updated');
+        showToast('Settings saved successfully', 'success');
+    }
+
+    initSoundUI() {
+        const soundTypes = [
+            { type: 'short-break', idPrefix: 'shortBreak' },
+            { type: 'long-break', idPrefix: 'longBreak' },
+            { type: 'work-start', idPrefix: 'workStart' },
+            { type: 'task-complete', idPrefix: 'taskComplete' },
+            { type: 'daily-reset', idPrefix: 'dailyReset' }
+        ];
+
+        soundTypes.forEach(({ type, idPrefix }) => {
+            const fileInput = document.getElementById(`${idPrefix}Sound`);
+            const volumeSlider = document.getElementById(`${idPrefix}Volume`);
+            const durationInput = document.getElementById(`${idPrefix}Duration`);
+            const fileNameSpan = document.getElementById(`${idPrefix}SoundName`);
+            const volumeValue = fileInput?.closest('.sound-setting-item')?.querySelector('.volume-value');
+            const testBtn = document.querySelector(`.test-sound-btn[data-sound-type="${type}"]`);
+            const resetBtn = document.querySelector(`.reset-sound-btn[data-sound-type="${type}"]`);
+
+            // File upload handler
+            if (fileInput) {
+                fileInput.addEventListener('change', async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    try {
+                        const volume = volumeSlider ? parseFloat(volumeSlider.value) / 100 : 1.0;
+                        const duration = durationInput ? parseInt(durationInput.value) * 1000 : 5000;
+
+                        await window.alertSoundManager.saveSound(type, file, volume, duration);
+
+                        if (fileNameSpan) {
+                            fileNameSpan.textContent = file.name;
+                        }
+
+                        showToast(`${type} sound uploaded successfully`, 'success');
+                    } catch (error) {
+                        console.error('Error saving sound:', error);
+                        showToast(error.message || 'Error uploading sound file', 'error');
+                        fileInput.value = ''; // Reset file input
+                    }
+                });
+            }
+
+            // Volume slider handler
+            if (volumeSlider) {
+                volumeSlider.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    if (volumeValue) {
+                        volumeValue.textContent = `${value}%`;
+                    }
+                });
+
+                volumeSlider.addEventListener('change', async (e) => {
+                    const volume = parseFloat(e.target.value) / 100;
+                    const duration = durationInput ? parseInt(durationInput.value) * 1000 : 5000;
+                    const currentConfig = window.alertSoundManager.soundTypes[type];
+
+                    if (currentConfig.file) {
+                        // Re-save with new volume
+                        const response = await fetch(currentConfig.file);
+                        const blob = await response.blob();
+                        const file = new File([blob], currentConfig.fileName || 'sound.mp3');
+                        await window.alertSoundManager.saveSound(type, file, volume, duration);
+                    }
+                });
+            }
+
+            // Duration input handler
+            if (durationInput) {
+                durationInput.addEventListener('change', async (e) => {
+                    const duration = parseInt(e.target.value) * 1000;
+                    const volume = volumeSlider ? parseFloat(volumeSlider.value) / 100 : 1.0;
+                    const currentConfig = window.alertSoundManager.soundTypes[type];
+
+                    if (currentConfig.file) {
+                        // Re-save with new duration
+                        const response = await fetch(currentConfig.file);
+                        const blob = await response.blob();
+                        const file = new File([blob], currentConfig.fileName || 'sound.mp3');
+                        await window.alertSoundManager.saveSound(type, file, volume, duration);
+                    }
+                });
+            }
+
+            // Test button handler
+            if (testBtn) {
+                testBtn.addEventListener('click', () => {
+                    window.alertSoundManager.testSound(type);
+                });
+            }
+
+            // Reset button handler
+            if (resetBtn) {
+                resetBtn.addEventListener('click', async () => {
+                    try {
+                        await window.alertSoundManager.resetToDefault(type);
+
+                        if (fileNameSpan) {
+                            fileNameSpan.textContent = 'Default alarm';
+                        }
+
+                        if (fileInput) {
+                            fileInput.value = '';
+                        }
+
+                        showToast(`${type} sound reset to default`, 'success');
+                    } catch (error) {
+                        console.error('Error resetting sound:', error);
+                        showToast('Error resetting sound', 'error');
+                    }
+                });
+            }
+        });
     }
 
     async requestNotificationPermission() {
@@ -806,6 +1057,9 @@ class PomodoroTimer {
         } else {
             this.addActivity('☕ Started break');
         }
+
+        // Update pomodoro progress indicator to show active state
+        this.updatePomodoroProgress();
     }
 
     pauseTimer() {
@@ -930,6 +1184,11 @@ class PomodoroTimer {
 
     createConfetti() {
         console.log('🎉 Creating canvas confetti animation!');
+        // Play task complete sound
+        if (window.alertSoundManager) {
+            window.alertSoundManager.playSound('task-complete');
+        }
+
 
         // Check if confetti library is loaded
         if (typeof confetti === 'undefined') {
@@ -1096,30 +1355,40 @@ class PomodoroTimer {
         // Clear start time
         this.startTime = null;
 
-        // Play loud alarm that loops for 10 seconds to really get attention
-        this.alarmSound.volume = 1.0; // Maximum volume
-        this.alarmSound.loop = true;
-        this.alarmSound.play().catch(e => console.log('Audio play failed:', e));
-
-        // Stop alarm after 10 seconds
-        setTimeout(() => {
-            this.alarmSound.pause();
-            this.alarmSound.currentTime = 0;
-            this.alarmSound.loop = false;
-        }, 10000);
+        // Play appropriate alert sound based on session type
+        if (this.isWorkSession) {
+            // Work session complete - determine if next break is long or short
+            const willBeLongBreak = this.longBreakInterval > 0 &&
+                                   (this.completedPomodoros + 1) >= this.longBreakInterval;
+            const soundType = willBeLongBreak ? 'long-break' : 'short-break';
+            if (window.alertSoundManager) {
+                window.alertSoundManager.playSound(soundType);
+            }
+        } else {
+            // Break complete - play work-start sound
+            if (window.alertSoundManager) {
+                window.alertSoundManager.playSound('work-start');
+            }
+        }
 
         // Show notifications
         if (this.isWorkSession) {
             const task = this.tasks.find(t => t.id === this.selectedTaskId);
             const taskName = task ? task.text : 'Unknown task';
+
+            // Already calculated above
+            const willBeLongBreak = this.longBreakInterval > 0 &&
+                                   (this.completedPomodoros + 1) >= this.longBreakInterval;
+
             this.showNotification(
                 '🍅 Work Session Complete!',
-                `Time for a break! You finished working on: ${taskName}`,
+                `Time for a ${willBeLongBreak ? 'long' : 'short'} break! You finished working on: ${taskName}`,
                 '✅'
             );
         } else {
+            const breakType = this.isLongBreak ? 'Long Break' : 'Short Break';
             this.showNotification(
-                '☕ Break Complete!',
+                `☕ ${breakType} Complete!`,
                 'Time to get back to work! Select a task and start a new session.',
                 '💪'
             );
@@ -1172,13 +1441,33 @@ class PomodoroTimer {
                 this.selectedTaskId = null;
             }
 
+            // Increment pomodoro counters
+            this.consecutiveWorkSessions++;
+            this.completedPomodoros++;
+
+            // Determine if this should be a long break
+            if (this.longBreakInterval > 0 && this.completedPomodoros >= this.longBreakInterval) {
+                // Start long break
+                this.isLongBreak = true;
+                this.currentDuration = this.longBreakDuration;
+                this.consecutiveWorkSessions = 0; // Reset counter for compatibility
+                this.completedPomodoros = 0; // Reset pomodoro cycle
+                this.addActivity('🎉 Long break time! You completed a full Pomodoro cycle');
+            } else {
+                // Start short break
+                this.isLongBreak = false;
+                this.currentDuration = this.breakDuration;
+                this.addActivity(`✅ Short break time (${this.completedPomodoros} of ${this.longBreakInterval} pomodoros)`);
+            }
+
             // Switch to break
             this.isWorkSession = false;
-            this.currentDuration = this.breakDuration;
         } else {
-            this.addActivity('✅ Break completed');
+            const breakType = this.isLongBreak ? 'long break' : 'short break';
+            this.addActivity(`✅ ${breakType.charAt(0).toUpperCase() + breakType.slice(1)} completed`);
 
-            // Switch to work
+            // Reset long break flag and switch to work
+            this.isLongBreak = false;
             this.isWorkSession = true;
             this.currentDuration = this.workDuration;
         }
@@ -1187,6 +1476,7 @@ class PomodoroTimer {
         this.startBtn.disabled = this.isWorkSession && !this.selectedTaskId;
         this.pauseBtn.disabled = true;
         this.updateDisplay();
+        this.updatePomodoroProgress(); // Update pomodoro cycle indicator
         this.updateStats();
         this.saveData();
     }
@@ -1198,7 +1488,32 @@ class PomodoroTimer {
         this.timeDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
         // Update session type
-        this.sessionTypeDisplay.textContent = this.isWorkSession ? 'Work Session' : 'Break Time';
+        if (this.isWorkSession) {
+            this.sessionTypeDisplay.textContent = 'Work Session';
+        } else {
+            this.sessionTypeDisplay.textContent = this.isLongBreak ? 'Long Break' : 'Short Break';
+        }
+
+        // Update pomodoro progress
+        if (this.longBreakInterval > 0) {
+            const current = this.consecutiveWorkSessions;
+            const total = this.longBreakInterval;
+            this.pomodoroText.textContent = `${current} of ${total} pomodoros`;
+
+            // Update visual progress indicators
+            if (this.pomodoroProgress) {
+                const steps = this.pomodoroProgress.querySelectorAll('.pomodoro-step');
+                steps.forEach((step, index) => {
+                    if (index < current) {
+                        step.classList.add('completed');
+                    } else {
+                        step.classList.remove('completed');
+                    }
+                });
+            }
+        } else {
+            this.pomodoroText.textContent = 'Long breaks disabled';
+        }
 
         // Update progress bar
         const progress = ((this.currentDuration - this.timeLeft) / this.currentDuration) * 100;
@@ -1244,6 +1559,37 @@ class PomodoroTimer {
             this.timerActions.classList.add('hidden');
             this.completeTaskBtn.classList.add('hidden');
             this.skipBreakBtn.classList.add('hidden');
+        }
+    }
+
+    updatePomodoroProgress() {
+        // Update the pomodoro cycle indicator UI
+        if (!this.pomodoroProgress || this.longBreakInterval <= 0) return;
+
+        const steps = this.pomodoroProgress.querySelectorAll('.pomodoro-step');
+        const completedCount = this.completedPomodoros;
+        const totalSteps = this.longBreakInterval;
+
+        steps.forEach((step, index) => {
+            // Clear all state classes first
+            step.classList.remove('completed', 'active', 'pending');
+
+            if (index < completedCount) {
+                // Mark as completed
+                step.classList.add('completed');
+            } else if (index === completedCount && this.isWorkSession && this.isRunning) {
+                // Mark as active (currently in progress)
+                step.classList.add('active');
+            } else if (index < totalSteps) {
+                // Mark as pending
+                step.classList.add('pending');
+            }
+        });
+
+        // Update text display
+        const pomodoroText = document.getElementById('pomodoroText');
+        if (pomodoroText) {
+            pomodoroText.textContent = `${completedCount} of ${totalSteps} pomodoros`;
         }
     }
 
@@ -2775,6 +3121,11 @@ class PomodoroTimer {
 
                 // Add activity notification
                 this.addActivity('📅 New day started - stats reset');
+                // Play daily reset sound
+                if (window.alertSoundManager) {
+                    window.alertSoundManager.playSound('daily-reset');
+                }
+
 
                 // Show notification if enabled
                 this.showNotification(
@@ -3111,7 +3462,340 @@ class PomodoroTimer {
         // Terminate Web Worker
         if (this.worker) {
             this.worker.postMessage({ action: 'stop' });
-            this.worker.terminate();
+
+// ============================================================================
+// Alert Sound Manager - Custom Alert Sounds System
+// ============================================================================
+
+class AlertSoundManager {
+    constructor() {
+        this.dbName = 'PomodoroAlertSounds';
+        this.dbVersion = 1;
+        this.storeName = 'sounds';
+        this.db = null;
+
+        // Sound types and their default configurations
+        this.soundTypes = {
+            'short-break': {
+                file: null,
+                volume: 1.0,
+                duration: 5000,
+                enabled: true,
+                name: 'Short Break Alert'
+            },
+            'long-break': {
+                file: null,
+                volume: 1.0,
+                duration: 5000,
+                enabled: true,
+                name: 'Long Break Alert'
+            },
+            'work-start': {
+                file: null,
+                volume: 1.0,
+                duration: 5000,
+                enabled: true,
+                name: 'Work Start Alert'
+            },
+            'task-complete': {
+                file: null,
+                volume: 0.8,
+                duration: 3000,
+                enabled: true,
+                name: 'Task Complete Alert'
+            },
+            'daily-reset': {
+                file: null,
+                volume: 0.7,
+                duration: 3000,
+                enabled: true,
+                name: 'Daily Reset Alert'
+            }
+        };
+
+        // Default alarm sound (embedded in HTML)
+        this.defaultAlarmSound = document.getElementById('alarmSound');
+
+        // Cache for loaded audio elements
+        this.audioCache = {};
+
+        this.initDB();
+    }
+
+    // Initialize IndexedDB
+    async initDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.dbVersion);
+
+            request.onerror = () => {
+                console.error('Failed to open IndexedDB:', request.error);
+                reject(request.error);
+            };
+
+            request.onsuccess = () => {
+                this.db = request.result;
+                console.log('AlertSoundManager: IndexedDB initialized');
+                resolve(this.db);
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    db.createObjectStore(this.storeName, { keyPath: 'type' });
+                    console.log('AlertSoundManager: Object store created');
+                }
+            };
+        });
+    }
+
+    // Load sound configuration from IndexedDB
+    async loadSound(type) {
+        if (!this.soundTypes[type]) {
+            console.error('Invalid sound type:', type);
+            return null;
+        }
+
+        try {
+            await this.ensureDBReady();
+
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction([this.storeName], 'readonly');
+                const store = transaction.objectStore(this.storeName);
+                const request = store.get(type);
+
+                request.onsuccess = () => {
+                    if (request.result) {
+                        // Merge with defaults
+                        this.soundTypes[type] = {
+                            ...this.soundTypes[type],
+                            ...request.result
+                        };
+                        resolve(request.result);
+                    } else {
+                        resolve(null);
+                    }
+                };
+
+                request.onerror = () => {
+                    console.error('Failed to load sound:', type, request.error);
+                    reject(request.error);
+                };
+            });
+        } catch (error) {
+            console.error('Error loading sound:', type, error);
+            return null;
+        }
+    }
+
+    // Save sound configuration to IndexedDB
+    async saveSound(type, file, volume, duration, enabled = true) {
+        if (!this.soundTypes[type]) {
+            throw new Error(`Invalid sound type: ${type}`);
+        }
+
+        // Validate file size (max 5MB)
+        const MAX_SIZE = 5 * 1024 * 1024;
+        if (file && file.size > MAX_SIZE) {
+            throw new Error(`File too large. Maximum size is 5MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+        }
+
+        try {
+            await this.ensureDBReady();
+
+            let audioData = null;
+            if (file) {
+                // Convert file to base64
+                audioData = await this.fileToBase64(file);
+            }
+
+            const soundConfig = {
+                type,
+                file: audioData,
+                fileName: file ? file.name : null,
+                volume: parseFloat(volume),
+                duration: parseInt(duration),
+                enabled: Boolean(enabled)
+            };
+
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction([this.storeName], 'readwrite');
+                const store = transaction.objectStore(this.storeName);
+                const request = store.put(soundConfig);
+
+                request.onsuccess = () => {
+                    // Update in-memory config
+                    this.soundTypes[type] = {
+                        ...this.soundTypes[type],
+                        ...soundConfig
+                    };
+
+                    // Clear audio cache for this type
+                    delete this.audioCache[type];
+
+                    console.log('Sound saved successfully:', type);
+                    resolve(soundConfig);
+                };
+
+                request.onerror = () => {
+                    console.error('Failed to save sound:', type, request.error);
+                    reject(request.error);
+                };
+            });
+        } catch (error) {
+            console.error('Error saving sound:', type, error);
+            throw error;
+        }
+    }
+
+    // Play sound by type
+    async playSound(type) {
+        if (!this.soundTypes[type]) {
+            console.error('Invalid sound type:', type);
+            return;
+        }
+
+        // Load sound config if not already loaded
+        if (!this.soundTypes[type].file) {
+            await this.loadSound(type);
+        }
+
+        const config = this.soundTypes[type];
+
+        if (!config.enabled) {
+            console.log('Sound disabled:', type);
+            return;
+        }
+
+        try {
+            let audio;
+
+            if (config.file) {
+                // Use custom sound
+                if (!this.audioCache[type]) {
+                    audio = new Audio(config.file);
+                    this.audioCache[type] = audio;
+                } else {
+                    audio = this.audioCache[type];
+                }
+            } else {
+                // Use default alarm sound
+                audio = this.defaultAlarmSound;
+                audio.currentTime = 0;
+            }
+
+            audio.volume = config.volume;
+            audio.loop = true;
+
+            // Play audio
+            await audio.play().catch(e => {
+                console.log('Audio play failed:', e);
+                throw e;
+            });
+
+            // Stop after duration
+            setTimeout(() => {
+                audio.pause();
+                audio.currentTime = 0;
+                audio.loop = false;
+            }, config.duration);
+
+        } catch (error) {
+            console.error('Error playing sound:', type, error);
+            // Fallback to default alarm
+            this.playDefaultAlarm(config.duration);
+        }
+    }
+
+    // Test sound (for UI preview)
+    async testSound(type) {
+        await this.playSound(type);
+    }
+
+    // Reset to default (remove custom sound)
+    async resetToDefault(type) {
+        if (!this.soundTypes[type]) {
+            throw new Error(`Invalid sound type: ${type}`);
+        }
+
+        try {
+            await this.ensureDBReady();
+
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction([this.storeName], 'readwrite');
+                const store = transaction.objectStore(this.storeName);
+                const request = store.delete(type);
+
+                request.onsuccess = () => {
+                    // Reset in-memory config to defaults
+                    this.soundTypes[type] = {
+                        ...this.soundTypes[type],
+                        file: null,
+                        fileName: null
+                    };
+
+                    // Clear audio cache
+                    delete this.audioCache[type];
+
+                    console.log('Sound reset to default:', type);
+                    resolve();
+                };
+
+                request.onerror = () => {
+                    console.error('Failed to reset sound:', type, request.error);
+                    reject(request.error);
+                };
+            });
+        } catch (error) {
+            console.error('Error resetting sound:', type, error);
+            throw error;
+        }
+    }
+
+    // Helper: Convert file to base64
+    fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // Helper: Ensure DB is ready
+    async ensureDBReady() {
+        if (!this.db) {
+            await this.initDB();
+        }
+    }
+
+    // Fallback to default alarm
+    playDefaultAlarm(duration = 5000) {
+        const audio = this.defaultAlarmSound;
+        audio.volume = 1.0;
+        audio.loop = true;
+        audio.currentTime = 0;
+
+        audio.play().catch(e => console.log('Default alarm play failed:', e));
+
+        setTimeout(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.loop = false;
+        }, duration);
+    }
+}
+
+// Global instance and function for Console 1
+let alertSoundManager;
+
+function playAlertSound(type) {
+    if (!alertSoundManager) {
+        console.error('AlertSoundManager not initialized');
+        return;
+    }
+    alertSoundManager.playSound(type);
+}
+
             this.worker = null;
         }
 
@@ -3137,7 +3821,50 @@ class PomodoroTimer {
     }
 }
 
+// Toast notification system
+function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toastContainer') || createToastContainer();
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    // Icon based on type
+    const icons = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ'
+    };
+
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || icons.info}</span>
+        <span class="toast-message">${message}</span>
+    `;
+
+    toastContainer.appendChild(toast);
+
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
+
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+    return container;
+}
+
+
 // Initialize the app when the page loads
 document.addEventListener('DOMContentLoaded', () => {
     window.pomodoroTimer = new PomodoroTimer();
+    alertSoundManager = new AlertSoundManager();
+    window.alertSoundManager = alertSoundManager; // Expose globally
 });

@@ -753,6 +753,27 @@ class PomodoroTimer {
         }
     }
 
+    updateSoundUI(soundType, volumeInput, durationInput, nameDisplay) {
+        const settings = this.soundSettings[soundType];
+        if (!settings) return;
+
+        if (volumeInput) {
+            volumeInput.value = settings.volume;
+            const volumeDisplay = volumeInput.nextElementSibling;
+            if (volumeDisplay && volumeDisplay.classList.contains('volume-value')) {
+                volumeDisplay.textContent = `${settings.volume}%`;
+            }
+        }
+
+        if (durationInput) {
+            durationInput.value = settings.duration;
+        }
+
+        if (nameDisplay) {
+            nameDisplay.textContent = settings.fileName || (settings.file ? 'Custom sound' : 'Default alarm');
+        }
+    }
+
     loadData() {
         const savedData = localStorage.getItem('pomodoroData');
         if (savedData) {
@@ -778,6 +799,19 @@ class PomodoroTimer {
             this.isLongBreak = data.isLongBreak || false;
             this.lastSyncTime = data.lastSyncTime || null;
 
+            // Load sound settings - support both old and new formats
+            if (data.soundSettings) {
+                // Merge saved settings with defaults
+                Object.keys(this.soundSettings).forEach(soundType => {
+                    if (data.soundSettings[soundType]) {
+                        this.soundSettings[soundType] = {
+                            ...this.soundSettings[soundType],
+                            ...data.soundSettings[soundType]
+                        };
+                    }
+                });
+            }
+
             // Update UI with loaded data
             this.workDurationInput.value = this.workDuration / 60;
             this.breakDurationInput.value = this.breakDuration / 60;
@@ -787,29 +821,12 @@ class PomodoroTimer {
             this.enableNotificationsInput.checked = this.notificationsEnabled;
             this.googleSheetsWebhookInput.value = this.googleSheetsWebhook;
 
-            // Update sound settings UI if elements exist
-            if (this.workCompleteVolumeInput) {
-                this.workCompleteVolumeInput.value = this.soundSettings.work.volume;
-                const workVolumeDisplay = this.workCompleteVolumeInput.nextElementSibling;
-                if (workVolumeDisplay) workVolumeDisplay.textContent = `${this.soundSettings.work.volume}%`;
-            }
-            if (this.workCompleteDurationInput) {
-                this.workCompleteDurationInput.value = this.soundSettings.work.duration;
-            }
-            if (this.breakCompleteVolumeInput) {
-                this.breakCompleteVolumeInput.value = this.soundSettings.break.volume;
-                const breakVolumeDisplay = this.breakCompleteVolumeInput.nextElementSibling;
-                if (breakVolumeDisplay) breakVolumeDisplay.textContent = `${this.soundSettings.break.volume}%`;
-            }
-            if (this.breakCompleteDurationInput) {
-                this.breakCompleteDurationInput.value = this.soundSettings.break.duration;
-            }
-            if (this.workCompleteSoundName && this.soundSettings.work.file) {
-                this.workCompleteSoundName.textContent = 'Custom sound';
-            }
-            if (this.breakCompleteSoundName && this.soundSettings.break.file) {
-                this.breakCompleteSoundName.textContent = 'Custom sound';
-            }
+            // Update sound settings UI for all 5 sound types
+            this.updateSoundUI('short-break', this.shortBreakVolumeInput, this.shortBreakDurationInput, this.shortBreakSoundName);
+            this.updateSoundUI('long-break', this.longBreakVolumeInput, this.longBreakDurationInput, this.longBreakSoundName);
+            this.updateSoundUI('work-start', this.workStartVolumeInput, this.workStartDurationInput, this.workStartSoundName);
+            this.updateSoundUI('task-complete', this.taskCompleteVolumeInput, this.taskCompleteDurationInput, this.taskCompleteSoundName);
+            this.updateSoundUI('daily-reset', this.dailyResetVolumeInput, this.dailyResetDurationInput, this.dailyResetSoundName);
         }
 
         // Load deleted task IDs
@@ -1274,6 +1291,8 @@ class PomodoroTimer {
         // Play task complete sound
         if (window.alertSoundManager) {
             window.alertSoundManager.playSound('task-complete');
+        } else {
+            this.playSound('task-complete');
         }
 
 
@@ -1450,11 +1469,15 @@ class PomodoroTimer {
             const soundType = willBeLongBreak ? 'long-break' : 'short-break';
             if (window.alertSoundManager) {
                 window.alertSoundManager.playSound(soundType);
+            } else {
+                this.playSound(soundType);
             }
         } else {
             // Break complete - play work-start sound
             if (window.alertSoundManager) {
                 window.alertSoundManager.playSound('work-start');
+            } else {
+                this.playSound('work-start');
             }
         }
 
@@ -3211,6 +3234,8 @@ class PomodoroTimer {
                 // Play daily reset sound
                 if (window.alertSoundManager) {
                     window.alertSoundManager.playSound('daily-reset');
+                } else {
+                    this.playSound('daily-reset');
                 }
 
 
@@ -3888,31 +3913,6 @@ function playAlertSound(type) {
         return;
     }
     alertSoundManager.playSound(type);
-}
-
-            this.worker = null;
-        }
-
-        // Revoke blob URL
-        if (this.workerBlobURL) {
-            URL.revokeObjectURL(this.workerBlobURL);
-            this.workerBlobURL = null;
-        }
-
-        // Release wake lock
-        this.releaseWakeLock();
-
-        // Clear sync queue
-        if (this.syncQueue) {
-            this.syncQueue.clear();
-        }
-
-        // Note: We don't remove event listeners here because they're on global objects
-        // and removing them would require storing references to the listener functions
-        // For a full cleanup in an SPA, consider using a more sophisticated event management system
-
-        console.log('Cleanup complete');
-    }
 }
 
 // Toast notification system

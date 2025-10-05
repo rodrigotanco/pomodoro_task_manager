@@ -170,8 +170,11 @@ class PomodoroTimer {
         this.userEmail = '';
         this.notificationsEnabled = true;
         this.soundSettings = {
-            work: { file: null, volume: 100, duration: 5 },
-            break: { file: null, volume: 100, duration: 5 }
+            'short-break': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
+            'long-break': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
+            'work-start': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
+            'task-complete': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' },
+            'daily-reset': { file: null, volume: 100, duration: 5, fileName: 'Default alarm' }
         };
 
         // Sleep-resistant timer properties
@@ -292,15 +295,31 @@ class PomodoroTimer {
         // Audio element
         this.alarmSound = document.getElementById('alarmSound');
 
-        // Sound settings elements
-        this.workCompleteSoundInput = document.getElementById('workCompleteSound');
-        this.workCompleteSoundName = document.getElementById('workCompleteSoundName');
-        this.workCompleteVolumeInput = document.getElementById('workCompleteVolume');
-        this.workCompleteDurationInput = document.getElementById('workCompleteDuration');
-        this.breakCompleteSoundInput = document.getElementById('breakCompleteSound');
-        this.breakCompleteSoundName = document.getElementById('breakCompleteSoundName');
-        this.breakCompleteVolumeInput = document.getElementById('breakCompleteVolume');
-        this.breakCompleteDurationInput = document.getElementById('breakCompleteDuration');
+        // Sound settings elements - All 5 sound types
+        this.shortBreakSoundInput = document.getElementById('shortBreakSound');
+        this.shortBreakSoundName = document.getElementById('shortBreakSoundName');
+        this.shortBreakVolumeInput = document.getElementById('shortBreakVolume');
+        this.shortBreakDurationInput = document.getElementById('shortBreakDuration');
+
+        this.longBreakSoundInput = document.getElementById('longBreakSound');
+        this.longBreakSoundName = document.getElementById('longBreakSoundName');
+        this.longBreakVolumeInput = document.getElementById('longBreakVolume');
+        this.longBreakDurationInput = document.getElementById('longBreakDuration');
+
+        this.workStartSoundInput = document.getElementById('workStartSound');
+        this.workStartSoundName = document.getElementById('workStartSoundName');
+        this.workStartVolumeInput = document.getElementById('workStartVolume');
+        this.workStartDurationInput = document.getElementById('workStartDuration');
+
+        this.taskCompleteSoundInput = document.getElementById('taskCompleteSound');
+        this.taskCompleteSoundName = document.getElementById('taskCompleteSoundName');
+        this.taskCompleteVolumeInput = document.getElementById('taskCompleteVolume');
+        this.taskCompleteDurationInput = document.getElementById('taskCompleteDuration');
+
+        this.dailyResetSoundInput = document.getElementById('dailyResetSound');
+        this.dailyResetSoundName = document.getElementById('dailyResetSoundName');
+        this.dailyResetVolumeInput = document.getElementById('dailyResetVolume');
+        this.dailyResetDurationInput = document.getElementById('dailyResetDuration');
 
         // Pomodoro progress indicator
         this.pomodoroProgress = document.getElementById('pomodoroProgress');

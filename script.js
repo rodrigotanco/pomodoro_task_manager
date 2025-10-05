@@ -3574,6 +3574,30 @@ class PomodoroTimer {
         // Terminate Web Worker
         if (this.worker) {
             this.worker.postMessage({ action: 'stop' });
+            this.worker = null;
+        }
+
+        // Revoke blob URL
+        if (this.workerBlobURL) {
+            URL.revokeObjectURL(this.workerBlobURL);
+            this.workerBlobURL = null;
+        }
+
+        // Release wake lock
+        this.releaseWakeLock();
+
+        // Clear sync queue
+        if (this.syncQueue) {
+            this.syncQueue.clear();
+        }
+
+        // Note: We don't remove event listeners here because they're on global objects
+        // and removing them would require storing references to the listener functions
+        // For a full cleanup in an SPA, consider using a more sophisticated event management system
+
+        console.log('Cleanup complete');
+    }
+}
 
 // ============================================================================
 // Alert Sound Manager - Custom Alert Sounds System

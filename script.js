@@ -1096,7 +1096,17 @@ class PomodoroTimer {
         // Clear start time
         this.startTime = null;
 
+        // Play loud alarm that loops for 10 seconds to really get attention
+        this.alarmSound.volume = 1.0; // Maximum volume
+        this.alarmSound.loop = true;
         this.alarmSound.play().catch(e => console.log('Audio play failed:', e));
+
+        // Stop alarm after 10 seconds
+        setTimeout(() => {
+            this.alarmSound.pause();
+            this.alarmSound.currentTime = 0;
+            this.alarmSound.loop = false;
+        }, 10000);
 
         // Show notifications
         if (this.isWorkSession) {

@@ -1,5 +1,5 @@
 // Google Apps Script code for automatic Pomodoro data sync with full task synchronization
-// Version: 3.0.2 with text/plain CORS bypass
+// Version: 3.0.3 - CORS fixed
 //
 // Instructions:
 // 1. Open your Google Sheet
@@ -8,16 +8,14 @@
 // 4. Save the project (name it "Pomodoro Sync")
 // 5. Deploy as web app:
 //    - Click "Deploy" → "New deployment" (NOT "Manage deployments")
-//    - Type: Web app
+//    - Click gear icon next to "Select type" → Choose "Web app"
 //    - Execute as: Me
-//    - Who has access: Anyone
-// 6. Copy the web app URL and use it in the Pomodoro timer settings
+//    - Who has access: Anyone (IMPORTANT: Must be "Anyone", not "Anyone with the link")
+// 6. Authorize the script when prompted
+// 7. Copy the web app URL and use it in the Pomodoro timer settings
 //
-// CORS WORKAROUND: Google Apps Script doesn't always respect CORS headers when
-// deployed as a Web App. To bypass this limitation, the client sends requests
-// with Content-Type: text/plain which is treated as a "simple request" and
-// doesn't trigger CORS preflight. The doOptions() function is still included
-// for completeness, but the text/plain approach is more reliable.
+// CORS NOTE: Google Apps Script automatically handles CORS when deployed with
+// "Who has access: Anyone". Custom CORS headers via setHeaders() are not supported.
 
 // Configuration
 const ACTIVITY_SHEET_NAME = 'Activity Log';
@@ -30,20 +28,11 @@ const SETTINGS_SHEET_NAME = 'Settings';
 // Task schema version - increment when changing task structure
 const TASK_SCHEMA_VERSION = 3; // Added Completed Tasks and Work Sessions sync
 
-// CORS headers for all responses
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Max-Age': '86400' // 24 hours cache for preflight
-};
-
 // Handle OPTIONS requests for CORS preflight
 function doOptions(e) {
   return ContentService
     .createTextOutput('')
-    .setMimeType(ContentService.MimeType.JSON)
-    .setHeaders(CORS_HEADERS);
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // Helper functions for sheet management
@@ -128,13 +117,11 @@ function doPost(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
   } catch (error) {
@@ -147,13 +134,11 @@ function doPost(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(errorResponse) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(errorResponse))
-        .setMimeType(ContentService.MimeType.JSON)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JSON);
     }
   }
 }
@@ -559,13 +544,11 @@ function doGet(e) {
     if (callback) {
       return ContentService
         .createTextOutput(callback + '(' + JSON.stringify(result) + ');')
-        .setMimeType(ContentService.MimeType.JAVASCRIPT)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     } else {
       return ContentService
         .createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON)
-        .setHeaders(CORS_HEADERS);
+        .setMimeType(ContentService.MimeType.JSON);
     }
   }
 
@@ -585,14 +568,12 @@ function doGet(e) {
     // JSONP response
     return ContentService
       .createTextOutput(callback + '(' + JSON.stringify(response) + ');')
-      .setMimeType(ContentService.MimeType.JAVASCRIPT)
-      .setHeaders(CORS_HEADERS);
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
   } else {
     // Regular JSON response
     return ContentService
       .createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeaders(CORS_HEADERS);
+      .setMimeType(ContentService.MimeType.JSON);
   }
 }
 

@@ -21,35 +21,180 @@
 
         <div id="settingsPanel" class="settings-panel hidden">
             <h3>Settings</h3>
-            <div class="setting-group">
-                <label for="workDuration">Work Duration (minutes):</label>
-                <input type="number" id="workDuration" min="1" max="60" value="25">
+
+            <!-- ⏱️ Timer Durations Section -->
+            <div class="settings-section">
+                <h4 class="section-heading">⏱️ Timer Durations</h4>
+                <div class="setting-group">
+                    <label for="workDuration">Work Duration (minutes):</label>
+                    <input type="number" id="workDuration" min="1" max="60" value="25">
+                </div>
+                <div class="setting-group">
+                    <label for="breakDuration">Short Break Duration (minutes):</label>
+                    <input type="number" id="breakDuration" min="1" max="30" value="5">
+                </div>
+                <div class="setting-group">
+                    <label for="longBreakDuration">Long Break Duration (minutes):</label>
+                    <input type="number" id="longBreakDuration" min="1" max="60" value="15">
+                </div>
             </div>
-            <div class="setting-group">
-                <label for="breakDuration">Break Duration (minutes):</label>
-                <input type="number" id="breakDuration" min="1" max="30" value="5">
+
+            <!-- 🔄 Pomodoro Cycle Section -->
+            <div class="settings-section">
+                <h4 class="section-heading">🔄 Pomodoro Cycle</h4>
+                <div class="setting-group">
+                    <label for="longBreakInterval">Long Break After (pomodoros):</label>
+                    <input type="number" id="longBreakInterval" min="2" max="8" value="4">
+                    <small>Take a long break after this many work sessions</small>
+                </div>
             </div>
-            <div class="setting-group">
-                <label for="userEmail">Email for Reports:</label>
-                <input type="email" id="userEmail" placeholder="your@email.com">
+
+            <!-- 📢 Alert Sounds Section -->
+            <div class="settings-section">
+                <h4 class="section-heading">📢 Alert Sounds</h4>
+
+                <div class="sound-setting-item" data-sound-type="short-break">
+                    <label class="sound-label">Short Break Alert:</label>
+                    <div class="sound-controls">
+                        <input type="file" id="shortBreakSound" accept=".mp3,.wav,.ogg,audio/*" class="file-input">
+                        <label for="shortBreakSound" class="file-label">📁 Choose File</label>
+                        <span class="file-name" id="shortBreakSoundName">Default alarm</span>
+                    </div>
+                    <div class="sound-controls-row">
+                        <div class="control-item">
+                            <label for="shortBreakVolume">Volume:</label>
+                            <input type="range" id="shortBreakVolume" min="0" max="100" value="100" class="volume-slider">
+                            <span class="volume-value">100%</span>
+                        </div>
+                        <div class="control-item">
+                            <label for="shortBreakDuration">Duration (s):</label>
+                            <input type="number" id="shortBreakDuration" min="1" max="30" value="5" class="duration-input">
+                        </div>
+                        <button class="test-sound-btn" data-sound-type="short-break">Test</button>
+                        <button class="reset-sound-btn" data-sound-type="short-break">Reset</button>
+                    </div>
+                </div>
+
+                <div class="sound-setting-item" data-sound-type="long-break">
+                    <label class="sound-label">Long Break Alert:</label>
+                    <div class="sound-controls">
+                        <input type="file" id="longBreakSound" accept=".mp3,.wav,.ogg,audio/*" class="file-input">
+                        <label for="longBreakSound" class="file-label">📁 Choose File</label>
+                        <span class="file-name" id="longBreakSoundName">Default alarm</span>
+                    </div>
+                    <div class="sound-controls-row">
+                        <div class="control-item">
+                            <label for="longBreakVolume">Volume:</label>
+                            <input type="range" id="longBreakVolume" min="0" max="100" value="100" class="volume-slider">
+                            <span class="volume-value">100%</span>
+                        </div>
+                        <div class="control-item">
+                            <label for="longBreakDuration">Duration (s):</label>
+                            <input type="number" id="longBreakDuration" min="1" max="30" value="5" class="duration-input">
+                        </div>
+                        <button class="test-sound-btn" data-sound-type="long-break">Test</button>
+                        <button class="reset-sound-btn" data-sound-type="long-break">Reset</button>
+                    </div>
+                </div>
+
+                <div class="sound-setting-item" data-sound-type="work-start">
+                    <label class="sound-label">Work Start Alert:</label>
+                    <div class="sound-controls">
+                        <input type="file" id="workStartSound" accept=".mp3,.wav,.ogg,audio/*" class="file-input">
+                        <label for="workStartSound" class="file-label">📁 Choose File</label>
+                        <span class="file-name" id="workStartSoundName">Default alarm</span>
+                    </div>
+                    <div class="sound-controls-row">
+                        <div class="control-item">
+                            <label for="workStartVolume">Volume:</label>
+                            <input type="range" id="workStartVolume" min="0" max="100" value="100" class="volume-slider">
+                            <span class="volume-value">100%</span>
+                        </div>
+                        <div class="control-item">
+                            <label for="workStartDuration">Duration (s):</label>
+                            <input type="number" id="workStartDuration" min="1" max="30" value="5" class="duration-input">
+                        </div>
+                        <button class="test-sound-btn" data-sound-type="work-start">Test</button>
+                        <button class="reset-sound-btn" data-sound-type="work-start">Reset</button>
+                    </div>
+                </div>
+
+                <div class="sound-setting-item" data-sound-type="task-complete">
+                    <label class="sound-label">Task Complete Alert:</label>
+                    <div class="sound-controls">
+                        <input type="file" id="taskCompleteSound" accept=".mp3,.wav,.ogg,audio/*" class="file-input">
+                        <label for="taskCompleteSound" class="file-label">📁 Choose File</label>
+                        <span class="file-name" id="taskCompleteSoundName">Default alarm</span>
+                    </div>
+                    <div class="sound-controls-row">
+                        <div class="control-item">
+                            <label for="taskCompleteVolume">Volume:</label>
+                            <input type="range" id="taskCompleteVolume" min="0" max="100" value="80" class="volume-slider">
+                            <span class="volume-value">80%</span>
+                        </div>
+                        <div class="control-item">
+                            <label for="taskCompleteDuration">Duration (s):</label>
+                            <input type="number" id="taskCompleteDuration" min="1" max="30" value="3" class="duration-input">
+                        </div>
+                        <button class="test-sound-btn" data-sound-type="task-complete">Test</button>
+                        <button class="reset-sound-btn" data-sound-type="task-complete">Reset</button>
+                    </div>
+                </div>
+
+                <div class="sound-setting-item" data-sound-type="daily-reset">
+                    <label class="sound-label">Daily Reset Alert:</label>
+                    <div class="sound-controls">
+                        <input type="file" id="dailyResetSound" accept=".mp3,.wav,.ogg,audio/*" class="file-input">
+                        <label for="dailyResetSound" class="file-label">📁 Choose File</label>
+                        <span class="file-name" id="dailyResetSoundName">Default alarm</span>
+                    </div>
+                    <div class="sound-controls-row">
+                        <div class="control-item">
+                            <label for="dailyResetVolume">Volume:</label>
+                            <input type="range" id="dailyResetVolume" min="0" max="100" value="70" class="volume-slider">
+                            <span class="volume-value">70%</span>
+                        </div>
+                        <div class="control-item">
+                            <label for="dailyResetDuration">Duration (s):</label>
+                            <input type="number" id="dailyResetDuration" min="1" max="30" value="3" class="duration-input">
+                        </div>
+                        <button class="test-sound-btn" data-sound-type="daily-reset">Test</button>
+                        <button class="reset-sound-btn" data-sound-type="daily-reset">Reset</button>
+                    </div>
+                </div>
             </div>
-            <div class="setting-group">
-                <label>
-                    <input type="checkbox" id="enableNotifications" checked>
-                    Enable Desktop Notifications
-                </label>
-                <small>Get browser notifications when timer completes</small>
+
+            <!-- 🔔 Notifications Section -->
+            <div class="settings-section">
+                <h4 class="section-heading">🔔 Notifications</h4>
+                <div class="setting-group">
+                    <label>
+                        <input type="checkbox" id="enableNotifications" checked>
+                        Enable Desktop Notifications
+                    </label>
+                    <small>Get browser notifications when timer completes</small>
+                </div>
             </div>
-            <div class="setting-group">
-                <label for="googleSheetsWebhook">Google Apps Script Webhook URL (optional):</label>
-                <input type="url" id="googleSheetsWebhook" placeholder="https://script.google.com/macros/s/your-script-id/exec">
-                <small>Deploy the provided Google Apps Script and paste the webhook URL here</small>
+
+            <!-- 📊 Google Sheets Section -->
+            <div class="settings-section">
+                <h4 class="section-heading">📊 Google Sheets Integration</h4>
+                <div class="setting-group">
+                    <label for="userEmail">Email for Reports:</label>
+                    <input type="email" id="userEmail" placeholder="your@email.com">
+                </div>
+                <div class="setting-group">
+                    <label for="googleSheetsWebhook">Google Apps Script Webhook URL (optional):</label>
+                    <input type="url" id="googleSheetsWebhook" placeholder="https://script.google.com/macros/s/your-script-id/exec">
+                    <small>Deploy the provided Google Apps Script and paste the webhook URL here</small>
+                </div>
+                <div class="setting-group">
+                    <button id="setupGoogleSheets" class="btn-secondary">📋 Setup Instructions</button>
+                    <!-- <button id="testConnection" class="btn-secondary">🔍 Test Connection</button> -->
+                    <small>Setup instructions for Google Sheets integration</small>
+                </div>
             </div>
-            <div class="setting-group">
-                <button id="setupGoogleSheets" class="btn-secondary">📋 Setup Instructions</button>
-                <!-- <button id="testConnection" class="btn-secondary">🔍 Test Connection</button> -->
-                <small>Setup instructions for Google Sheets integration</small>
-            </div>
+
             <button id="saveSettings" class="btn-primary">Save Settings</button>
         </div>
 
@@ -58,6 +203,24 @@
                 <div class="timer-display">
                     <div id="timeLeft" class="time">25:00</div>
                     <div id="sessionType" class="session-type">Work Session</div>
+
+                    <!-- Pomodoro Cycle Progress Indicator -->
+                    <div id="pomodoroProgress" class="pomodoro-progress">
+                        <div class="pomodoro-step" data-step="1">
+                            <div class="step-circle"></div>
+                        </div>
+                        <div class="pomodoro-step" data-step="2">
+                            <div class="step-circle"></div>
+                        </div>
+                        <div class="pomodoro-step" data-step="3">
+                            <div class="step-circle"></div>
+                        </div>
+                        <div class="pomodoro-step" data-step="4">
+                            <div class="step-circle"></div>
+                        </div>
+                    </div>
+                    <div id="pomodoroText" class="pomodoro-text">0 of 4 pomodoros</div>
+
                     <div id="progressBar" class="progress-bar">
                         <div id="progress" class="progress"></div>
                     </div>
@@ -206,6 +369,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <!-- Canvas Confetti Library -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"

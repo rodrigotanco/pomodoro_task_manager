@@ -473,9 +473,38 @@ main {
     font-size: 1.5rem;
 }
 
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.collapsible-header:hover {
+    color: #ff6b6b;
+}
+
+.toggle-icon {
+    transition: transform 0.3s ease;
+    display: inline-block;
+    font-size: 0.8em;
+}
+
+.toggle-icon.expanded {
+    transform: rotate(90deg);
+}
+
 .activity-list {
     max-height: 200px;
     overflow-y: auto;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.activity-list.collapsed {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
 }
 
 .activity-item {

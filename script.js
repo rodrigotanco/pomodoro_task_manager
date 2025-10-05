@@ -274,6 +274,7 @@ class PomodoroTimer {
         this.sendReportBtn = document.getElementById('sendReportBtn');
         this.syncNowBtn = document.getElementById('syncNowBtn');
         this.activityList = document.getElementById('activityList');
+        this.activityLogHeader = document.getElementById('activityLogHeader');
 
         // Sync status elements
         this.syncStatusIndicator = document.getElementById('syncStatusIndicator');
@@ -355,6 +356,9 @@ class PomodoroTimer {
         this.bulkDeleteBtn.addEventListener('click', () => this.bulkDeleteTasks());
         this.bulkArchiveBtn.addEventListener('click', () => this.bulkArchiveTasks());
         this.cancelSelectionBtn.addEventListener('click', () => this.cancelBulkSelection());
+
+        // Activity log toggle
+        this.activityLogHeader.addEventListener('click', () => this.toggleActivityLog());
 
         // Google Sheets setup
         this.setupGoogleSheetsBtn.addEventListener('click', () => this.showSetupModal());
@@ -3481,6 +3485,12 @@ class PomodoroTimer {
 
     cancelBulkSelection() {
         this.exitBulkSelectionMode();
+    }
+
+    toggleActivityLog() {
+        const toggleIcon = this.activityLogHeader.querySelector('.toggle-icon');
+        this.activityList.classList.toggle('collapsed');
+        toggleIcon.classList.toggle('expanded');
     }
 
     handleSelectAll(checked) {

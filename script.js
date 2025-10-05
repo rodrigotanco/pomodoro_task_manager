@@ -420,12 +420,21 @@ class PomodoroTimer {
             });
         });
 
-        // Set up file input handlers (if they exist in the new HTML)
-        if (this.workCompleteSoundInput) {
-            this.workCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'work'));
+        // Set up file input handlers for all 5 sound types
+        if (this.shortBreakSoundInput) {
+            this.shortBreakSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'short-break'));
         }
-        if (this.breakCompleteSoundInput) {
-            this.breakCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'break'));
+        if (this.longBreakSoundInput) {
+            this.longBreakSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'long-break'));
+        }
+        if (this.workStartSoundInput) {
+            this.workStartSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'work-start'));
+        }
+        if (this.taskCompleteSoundInput) {
+            this.taskCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'task-complete'));
+        }
+        if (this.dailyResetSoundInput) {
+            this.dailyResetSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'daily-reset'));
         }
     }
 
@@ -452,9 +461,18 @@ class PomodoroTimer {
         const reader = new FileReader();
         reader.onload = (e) => {
             this.soundSettings[type].file = e.target.result;
+            this.soundSettings[type].fileName = file.name;
 
-            // Update filename display
-            const nameDisplay = type === 'work' ? this.workCompleteSoundName : this.breakCompleteSoundName;
+            // Update filename display based on sound type
+            const nameDisplayMap = {
+                'short-break': this.shortBreakSoundName,
+                'long-break': this.longBreakSoundName,
+                'work-start': this.workStartSoundName,
+                'task-complete': this.taskCompleteSoundName,
+                'daily-reset': this.dailyResetSoundName
+            };
+
+            const nameDisplay = nameDisplayMap[type];
             if (nameDisplay) {
                 nameDisplay.textContent = file.name;
             }
@@ -1025,6 +1043,56 @@ class PomodoroTimer {
             } catch (error) {
                 console.log('Error showing notification:', error);
             }
+        }
+    }
+
+    playSound(soundType, customDuration = null) {
+        // Use AlertSoundManager if available (preferred)
+        if (window.alertSoundManager) {
+            window.alertSoundManager.playSound(soundType);
+            return;
+        }
+
+        // Fallback to legacy sound system
+        const soundConfig = this.soundSettings[soundType];
+        if (!soundConfig) {
+            console.warn(`Sound type ${soundType} not found`);
+            return;
+        }
+
+        // Create audio element
+        const audio = new Audio();
+        const duration = customDuration || soundConfig.duration * 1000; // Convert to ms
+        const volume = soundConfig.volume / 100;
+
+        // Use custom sound if available, otherwise use default alarm
+        if (soundConfig.file) {
+            audio.src = soundConfig.file;
+        } else if (this.alarmSound) {
+            audio.src = this.alarmSound.src;
+        } else {
+            console.warn('No audio source available');
+            return;
+        }
+
+        audio.volume = volume;
+
+        // Play the sound
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise
+                .then(() => {
+                    console.log(`Playing ${soundType} sound for ${duration}ms at ${volume * 100}% volume`);
+
+                    // Stop after duration
+                    setTimeout(() => {
+                        audio.pause();
+                        audio.currentTime = 0;
+                    }, duration);
+                })
+                .catch(error => {
+                    console.error('Error playing sound:', error);
+                });
         }
     }
 
@@ -3673,10 +3741,8 @@ class AlertSoundManager {
             return;
         }
 
-        // Load sound config if not already loaded
-        if (!this.soundTypes[type].file) {
-            await this.loadSound(type);
-        }
+        // Try to load sound config from DB
+        await this.loadSound(type);
 
         const config = this.soundTypes[type];
 
@@ -3684,6 +3750,8 @@ class AlertSoundManager {
             console.log('Sound disabled:', type);
             return;
         }
+
+        console.log('Playing sound:', type, 'config:', config);
 
         try {
             let audio;
@@ -3702,8 +3770,11 @@ class AlertSoundManager {
                 audio.currentTime = 0;
             }
 
-            audio.volume = config.volume;
+            // Volume is 0-1, duration is in milliseconds
+            audio.volume = typeof config.volume === 'number' ? config.volume : 1.0;
             audio.loop = true;
+
+            console.log('Audio element:', audio, 'Volume:', audio.volume, 'Duration:', config.duration);
 
             // Play audio
             await audio.play().catch(e => {
@@ -3711,12 +3782,16 @@ class AlertSoundManager {
                 throw e;
             });
 
-            // Stop after duration
+            console.log('Audio playing...');
+
+            // Stop after duration (duration is in milliseconds)
+            const duration = config.duration || 5000;
             setTimeout(() => {
                 audio.pause();
                 audio.currentTime = 0;
                 audio.loop = false;
-            }, config.duration);
+                console.log('Audio stopped after', duration, 'ms');
+            }, duration);
 
         } catch (error) {
             console.error('Error playing sound:', type, error);

@@ -1254,7 +1254,9 @@ class PomodoroTimer {
                 taskId: this.selectedTaskId,
                 taskText: task ? task.text : 'Unknown task',
                 duration: elapsedMinutes,  // Actual elapsed time
-                completedAt: new Date().toISOString()
+                completedAt: new Date().toISOString(),
+                isLongBreak: this.isLongBreak || false,
+                pomodoroCount: this.completedPomodoros
             };
 
             console.log('✅ Creating work session:', workSession);
@@ -1537,7 +1539,9 @@ class PomodoroTimer {
                 taskId: this.selectedTaskId,
                 taskText: task ? task.text : 'Unknown task',
                 duration: this.workDuration,
-                completedAt: new Date().toISOString()
+                completedAt: new Date().toISOString(),
+                isLongBreak: this.isLongBreak || false,
+                pomodoroCount: this.completedPomodoros
             };
             this.workSessions.push(workSession);
 
@@ -2778,6 +2782,36 @@ class PomodoroTimer {
             console.log(`Stats merge: ${addedCount} added, ${updatedCount} updated work sessions`);
             // Persist changes to localStorage
             this.saveData();
+        }
+
+        // Restore pomodoro counter from the latest work session (for long break tracking)
+        this.restorePomodoroCounter();
+    }
+
+    restorePomodoroCounter() {
+        // Find the most recent work session from today
+        const today = getTodayUTC();
+        const todaysSessions = this.workSessions.filter(s => {
+            const sessionDate = getDateUTC(s.completedAt);
+            return sessionDate === today;
+        });
+
+        if (todaysSessions.length > 0) {
+            // Get the latest session (already sorted by completedAt descending)
+            const latestSession = todaysSessions[0];
+
+            if (latestSession.pomodoroCount !== undefined) {
+                // Restore the pomodoro count from the latest session
+                this.completedPomodoros = latestSession.pomodoroCount;
+                console.log(`🔄 Restored pomodoro counter to ${this.completedPomodoros} from latest work session`);
+
+                // Update progress display
+                this.updatePomodoroProgress();
+            }
+        } else {
+            // No sessions today, reset counter
+            this.completedPomodoros = 0;
+            this.updatePomodoroProgress();
         }
     }
 

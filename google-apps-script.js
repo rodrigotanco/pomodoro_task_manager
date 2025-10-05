@@ -26,7 +26,7 @@ const ARCHIVED_TASKS_SHEET_NAME = 'Archived Tasks';
 const SETTINGS_SHEET_NAME = 'Settings';
 
 // Task schema version - increment when changing task structure
-const TASK_SCHEMA_VERSION = 3; // Added Completed Tasks and Work Sessions sync
+const TASK_SCHEMA_VERSION = 4; // Added long break tracking to Work Sessions
 
 // Handle OPTIONS requests for CORS preflight
 function doOptions(e) {
@@ -435,20 +435,22 @@ function completeTask(data) {
   // Step 3: Add work session if provided
   if (workSession) {
     const sessionsSheet = getOrCreateSheet(WORK_SESSIONS_SHEET_NAME, [
-      'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status'
+      'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status', 'Is Long Break', 'Pomodoro Count'
     ]);
 
     const existingSessionRow = findWorkSessionRow(sessionsSheet, workSession.id);
     if (existingSessionRow === -1) {
       const nextRow = sessionsSheet.getLastRow() + 1;
-      sessionsSheet.getRange(nextRow, 1, 1, 7).setValues([[
+      sessionsSheet.getRange(nextRow, 1, 1, 9).setValues([[
         workSession.id,
         workSession.taskId || '',
         workSession.taskText || task.text,
         Math.round(workSession.duration / 60),
         workSession.completedAt || timestamp,
         deviceId,
-        'synced'
+        'synced',
+        workSession.isLongBreak || false,
+        workSession.pomodoroCount || 0
       ]]);
       console.log('Added work session:', workSession.id);
     }
@@ -692,7 +694,7 @@ function syncWorkSessions(data) {
   console.log('syncWorkSessions called with data:', JSON.stringify(data));
 
   const sheet = getOrCreateSheet(WORK_SESSIONS_SHEET_NAME, [
-    'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status'
+    'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status', 'Is Long Break', 'Pomodoro Count'
   ]);
 
   const sessions = data.workSessions || [];
@@ -710,14 +712,16 @@ function syncWorkSessions(data) {
     if (existingRowIndex === -1) {
       // New work session - add it
       const nextRow = sheet.getLastRow() + 1;
-      sheet.getRange(nextRow, 1, 1, 7).setValues([[
+      sheet.getRange(nextRow, 1, 1, 9).setValues([[
         session.id,
         session.taskId || '',
         session.taskText || 'Unknown task',
         Math.round(session.duration / 60), // Convert seconds to minutes
         session.completedAt || timestamp,
         deviceId,
-        'synced'
+        'synced',
+        session.isLongBreak || false,
+        session.pomodoroCount || 0
       ]]);
       syncedCount++;
       console.log('Added work session to sheet:', session.taskText);
@@ -737,7 +741,7 @@ function getWorkSessions(data) {
   console.log('getWorkSessions called with data:', JSON.stringify(data));
 
   const sheet = getOrCreateSheet(WORK_SESSIONS_SHEET_NAME, [
-    'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status'
+    'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status', 'Is Long Break', 'Pomodoro Count'
   ]);
 
   const filterDate = data.date; // Optional: filter by date (format: "YYYY-MM-DD" in UTC)
@@ -750,7 +754,7 @@ function getWorkSessions(data) {
     return { success: true, workSessions: [] };
   }
 
-  const dataRange = sheet.getRange(2, 1, lastRow - 1, 7);
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 9);
   const values = dataRange.getValues();
 
   let sessions = values
@@ -762,7 +766,9 @@ function getWorkSessions(data) {
       duration: row[3] * 60, // Convert minutes back to seconds
       completedAt: row[4],
       deviceId: row[5],
-      syncStatus: row[6]
+      syncStatus: row[6],
+      isLongBreak: row[7] || false,
+      pomodoroCount: row[8] || 0
     }));
 
   // Filter by date if provided (using UTC format YYYY-MM-DD for consistency)

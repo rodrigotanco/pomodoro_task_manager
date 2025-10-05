@@ -530,6 +530,7 @@
                 <li><a href="#google-sheets">📊 Google Sheets Integration</a></li>
                 <li><a href="#pro-tips">💡 Pro Tips & Best Practices</a></li>
                 <li><a href="#faq">❓ Frequently Asked Questions</a></li>
+                <li><a href="#privacy">🔒 Privacy & Data Storage</a></li>
                 <li><a href="#ready">🎉 Ready to Start</a></li>
             </ul>
         </div>
@@ -540,14 +541,23 @@
                     <h2>🧠 Why the Pomodoro Technique Works</h2>
                     <p>The Pomodoro Technique, developed by Francesco Cirillo in the late 1980s, is a scientifically-backed time management method that breaks work into focused 25-minute intervals. Here's why it's so effective:</p>
 
+                    <h3>The Classic Pomodoro Cycle</h3>
+                    <p>The traditional technique uses a cycle of focused work sessions followed by breaks:</p>
+                    <ul class="benefits-list">
+                        <li><strong>Work Sessions:</strong> 25 minutes of focused work on a single task</li>
+                        <li><strong>Short Breaks:</strong> 5 minutes after each work session (1st, 2nd, 3rd pomodoro)</li>
+                        <li><strong>Long Breaks:</strong> 15-30 minutes after completing 4 pomodoros</li>
+                        <li><strong>Repeat:</strong> The cycle continues throughout your workday</li>
+                    </ul>
+
                     <h3>Scientific Benefits</h3>
                     <ul class="benefits-list">
-                        <li><strong>Reduces Mental Fatigue:</strong> Regular breaks prevent cognitive overload and maintain peak performance</li>
+                        <li><strong>Reduces Mental Fatigue:</strong> Regular short breaks prevent cognitive overload; long breaks provide deeper recovery</li>
                         <li><strong>Improves Focus:</strong> Short, timed sessions create urgency and eliminate distractions</li>
                         <li><strong>Builds Momentum:</strong> Completing small tasks creates a sense of accomplishment and motivation</li>
                         <li><strong>Combats Procrastination:</strong> 25 minutes feels manageable, making it easier to start difficult tasks</li>
                         <li><strong>Enhances Time Awareness:</strong> You become more conscious of how long tasks actually take</li>
-                        <li><strong>Prevents Burnout:</strong> Mandatory breaks ensure sustainable work patterns</li>
+                        <li><strong>Prevents Burnout:</strong> The long break cycle ensures sustainable work patterns over extended periods</li>
                     </ul>
 
                     <div class="tip">
@@ -594,8 +604,12 @@
                 <h2>🔧 Key Features</h2>
                 <div class="feature-grid">
                     <div class="feature-card">
-                        <h4>⏱️ Customizable Timer</h4>
-                        <p>Adjust work sessions (default 25 min) and break duration (default 5 min) to match your needs and attention span.</p>
+                        <h4>⏱️ Customizable Timers</h4>
+                        <p>Adjust work sessions (default 25 min), short breaks (default 5 min), and long breaks (default 15 min) to match your needs.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🔄 Long Breaks</h4>
+                        <p>Classic Pomodoro technique with extended breaks after completing multiple work sessions (default: every 4 pomodoros).</p>
                     </div>
                     <div class="feature-card">
                         <h4>📝 Task Management</h4>
@@ -603,11 +617,11 @@
                     </div>
                     <div class="feature-card">
                         <h4>📊 Progress Tracking</h4>
-                        <p>View real-time statistics: tasks completed today, work sessions finished, and total focus time achieved.</p>
+                        <p>View real-time statistics and visual pomodoro cycle progress showing how many sessions until your next long break.</p>
                     </div>
                     <div class="feature-card">
-                        <h4>🔔 Smart Notifications</h4>
-                        <p>Get desktop notifications when sessions complete, even when the browser tab isn't active.</p>
+                        <h4>🔔 Custom Alert Sounds</h4>
+                        <p>Upload your own alert sounds for breaks and completions, with individual volume and duration controls for each type.</p>
                     </div>
                     <div class="feature-card">
                         <h4>📧 Daily Reports</h4>
@@ -617,14 +631,50 @@
                         <h4>🔄 Data Sync</h4>
                         <p>Optional Google Sheets integration to backup your data and sync across multiple devices.</p>
                     </div>
+                    <div class="feature-card">
+                        <h4>💡 Smart Notifications</h4>
+                        <p>Get desktop notifications when sessions complete, even when the browser tab isn't active.</p>
+                    </div>
                 </div>
 
                 <h3 id="settings">⚙️ Settings & Customization</h3>
-                <p>Access all configuration options through the Settings panel. Customize timers, set up notifications, configure Google Sheets sync, and more.</p>
+                <p>Access all configuration options through the Settings panel. The settings are organized into logical sections for easy navigation:</p>
+
+                <h4>⏱️ Timer Durations</h4>
+                <ul class="benefits-list">
+                    <li><strong>Work Duration:</strong> Length of focused work sessions (1-60 minutes, default 25)</li>
+                    <li><strong>Short Break Duration:</strong> Length of regular breaks (1-30 minutes, default 5)</li>
+                    <li><strong>Long Break Duration:</strong> Length of extended breaks (1-60 minutes, default 15)</li>
+                </ul>
+
+                <h4>🔄 Pomodoro Cycle</h4>
+                <ul class="benefits-list">
+                    <li><strong>Long Break Interval:</strong> Number of work sessions before a long break (2-8 pomodoros, default 4)</li>
+                    <li><strong>Progress Indicator:</strong> Visual circles show your progress through the current cycle</li>
+                    <li><strong>Cycle Counter:</strong> Display shows "X of Y pomodoros" to track your position</li>
+                </ul>
+
+                <h4>📢 Alert Sounds</h4>
+                <p>Customize alert sounds for different events. Each sound can be individually configured:</p>
+                <ul class="benefits-list">
+                    <li><strong>Short Break Alert:</strong> Plays when it's time for a regular break</li>
+                    <li><strong>Long Break Alert:</strong> Plays when it's time for an extended break</li>
+                    <li><strong>Work Start Alert:</strong> Plays when a break ends and work resumes</li>
+                    <li><strong>Task Complete Alert:</strong> Plays when you mark a task as complete</li>
+                    <li><strong>Daily Reset Alert:</strong> Optional sound when the day resets at midnight</li>
+                </ul>
+                <p>For each alert, you can:</p>
+                <ul class="benefits-list">
+                    <li>Upload custom audio files (MP3, WAV, OGG formats)</li>
+                    <li>Adjust volume (0-100%)</li>
+                    <li>Set duration (1-30 seconds)</li>
+                    <li>Test the sound before saving</li>
+                    <li>Reset to default sound anytime</li>
+                </ul>
 
                 <img src="images/settings-panel.png" alt="Settings panel showing all configuration options" class="screenshot">
                 <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
-                    Complete settings panel with timer customization, email setup, and Google Sheets integration
+                    Complete settings panel with timer customization, pomodoro cycle, custom sounds, and Google Sheets integration
                 </p>
             </div>
 
@@ -766,6 +816,14 @@
                         <h4>📈 Weekly Reviews</h4>
                         <p>Review your daily reports weekly to identify productivity patterns and optimize your schedule.</p>
                     </div>
+                    <div class="feature-card">
+                        <h4>🔊 Sound Strategy</h4>
+                        <p>Use calming sounds for breaks (to encourage rest) and energizing sounds for work start (to boost motivation). Different sounds help your brain recognize different states.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>⏰ Long Break Activities</h4>
+                        <p>Use long breaks (15-30 min) for substantial recovery: take a walk, eat a snack, meditate, or completely disconnect from work. This deep rest sustains productivity for hours.</p>
+                    </div>
                 </div>
 
                 <div class="tip">
@@ -788,7 +846,17 @@
 
                 <div class="faq-item">
                     <div class="faq-question">Q: Can I change the timer duration?</div>
-                    <p>Absolutely! Click the settings button (⚙️) to customize both work session duration (1-60 minutes) and break duration (1-30 minutes) to suit your needs.</p>
+                    <p>Absolutely! Click the settings button (⚙️) to customize work sessions (1-60 minutes), short breaks (1-30 minutes), and long breaks (1-60 minutes) to suit your needs.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: What are long breaks and how do they work?</div>
+                    <p>Long breaks are extended rest periods that occur after completing multiple work sessions (default: every 4 pomodoros). They help prevent burnout and maintain productivity throughout the day. The progress indicator shows "X of Y pomodoros" to track when your next long break will occur.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Can I upload my own alert sounds?</div>
+                    <p>Yes! Go to Settings → Alert Sounds section. You can upload custom audio files (MP3, WAV, OGG) for 5 different alert types: short breaks, long breaks, work start, task completion, and daily reset. Each sound has independent volume and duration controls.</p>
                 </div>
 
                 <div class="faq-item">
@@ -814,6 +882,68 @@
                 <div class="faq-item">
                     <div class="faq-question">Q: What happens during breaks?</div>
                     <p>Take a real break! Step away from your screen, stretch, hydrate, or take a short walk. Avoid work-related activities to let your mind recharge.</p>
+                </div>
+            </div>
+
+            <div class="section" id="privacy">
+                <div class="why-pomodoro">
+                    <h2>🔒 Privacy & Data Storage</h2>
+                    <p>Your privacy matters. The Pomodoro Timer is built with a <strong>privacy-first, local-first</strong> approach that puts you in complete control of your data.</p>
+
+                    <h3>How Your Data is Stored</h3>
+                    <p>All your productivity data is stored <strong>locally in your browser</strong> using modern web storage technologies:</p>
+                    <ul class="benefits-list">
+                        <li><strong>localStorage:</strong> Stores your tasks, settings, daily statistics, and activity logs</li>
+                        <li><strong>IndexedDB:</strong> Stores custom alert sound files (audio data)</li>
+                        <li><strong>No External Servers:</strong> By default, nothing is sent to any server or third party</li>
+                    </ul>
+
+                    <h3>Privacy Benefits of Browser Storage</h3>
+                    <ul class="benefits-list">
+                        <li><strong>Complete Data Ownership:</strong> You own 100% of your data - it stays on your device</li>
+                        <li><strong>No Tracking or Analytics:</strong> We don't collect, track, or analyze your usage patterns</li>
+                        <li><strong>Works Offline:</strong> Your timer functions completely offline after initial load</li>
+                        <li><strong>No Account Required:</strong> Start using immediately without creating accounts or providing personal information</li>
+                        <li><strong>GDPR & Privacy Law Compliant:</strong> No data collection means no privacy concerns</li>
+                        <li><strong>Zero Server Dependency:</strong> Your productivity workflow isn't affected by server outages or internet connectivity</li>
+                        <li><strong>Browser Sandboxing:</strong> Data is isolated per browser and protected by browser security</li>
+                    </ul>
+
+                    <h3>What Data is Stored Locally?</h3>
+                    <ul class="benefits-list">
+                        <li>Your task list and task completion status</li>
+                        <li>Timer settings (work duration, break duration, long break interval)</li>
+                        <li>Daily statistics (sessions completed, focus time, tasks completed)</li>
+                        <li>Activity log (session start times, completions, breaks)</li>
+                        <li>Custom alert sound files you upload</li>
+                        <li>Sound preferences (volume, duration for each alert type)</li>
+                        <li>Google Sheets webhook URL (if you choose to enable sync)</li>
+                    </ul>
+
+                    <h3>Optional Cloud Sync: Your Choice</h3>
+                    <p>Google Sheets integration is <strong>completely optional</strong>. It's designed for users who want:</p>
+                    <ul class="benefits-list">
+                        <li>Backup of their productivity data</li>
+                        <li>Access from multiple devices</li>
+                        <li>Advanced analysis and custom reports</li>
+                    </ul>
+                    <p><strong>Important:</strong> Even with Google Sheets sync enabled, data only goes to <em>your own</em> Google Sheet that you control. No third-party servers are involved.</p>
+
+                    <h3>Data Control & Management</h3>
+                    <ul class="benefits-list">
+                        <li><strong>Clear Data Anytime:</strong> Use your browser's settings to clear all stored data instantly</li>
+                        <li><strong>Export Capability:</strong> Sync to Google Sheets acts as a data export mechanism</li>
+                        <li><strong>No Vendor Lock-in:</strong> Your data is in standard formats you can access directly</li>
+                        <li><strong>Transparent Storage:</strong> Use browser DevTools to inspect exactly what's stored</li>
+                    </ul>
+
+                    <div class="tip">
+                        <strong>🔐 Privacy Recommendation:</strong> If you need maximum privacy, simply don't configure Google Sheets integration. The timer works perfectly as a standalone, fully private productivity tool with zero external communication.
+                    </div>
+
+                    <div class="warning">
+                        <strong>⚠️ Important Note:</strong> Browser storage is tied to your specific browser on your specific device. If you clear browser data, uninstall the browser, or use a different device, your local data will not be available. Use Google Sheets sync if you need backup or multi-device access.
+                    </div>
                 </div>
             </div>
 

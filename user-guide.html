@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🍅 Pomodoro Timer - User Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMjAiIGZpbGw9IiNmZjZiNmIiLz4KPHN2ZyB4PSIxNiIgeT0iMTYiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+CjxyZWN0IHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzAwMDAwMCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiI+8J+NhTwvcmVjdD4KPC9zdmc+Cjwvc3ZnPgo=">
     <style>
         * {
@@ -12,66 +15,133 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --primary-color: #E85D5D;
+            --primary-hover: #D94F4F;
+            --dark-color: #1F2937;
+            --light-color: #F4F4F5;
+            --surface: #FFFFFF;
+            --border: #E7E7EA;
+            --text-color: #1F2937;
+            --text-light: #5F6B7A;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 100%);
+            font-family: 'Outfit', sans-serif;
+            background: var(--light-color);
             min-height: 100vh;
-            color: #333;
+            color: var(--text-color);
             line-height: 1.6;
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1040px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 24px 20px 40px;
         }
 
         .header {
-            text-align: center;
-            margin-bottom: 40px;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 30px 20px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
+            margin-bottom: 24px;
+            padding: 8px 4px 20px;
+            border-bottom: 1px solid var(--border);
         }
 
         .header h1 {
-            font-size: 3rem;
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-            margin-bottom: 10px;
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: var(--dark-color);
+            margin-bottom: 8px;
         }
 
         .header p {
-            font-size: 1.2rem;
-            color: rgba(255, 255, 255, 0.9);
-            margin-bottom: 20px;
+            font-size: 1rem;
+            color: var(--text-light);
+            margin-bottom: 16px;
         }
 
         .back-btn {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 25px;
+            background: var(--surface);
+            color: var(--text-color);
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 50px;
             cursor: pointer;
-            font-size: 1rem;
+            font-family: inherit;
+            font-size: 0.9rem;
             text-decoration: none;
             display: inline-block;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s ease, color 0.2s ease;
         }
 
         .back-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
+            border-color: var(--text-light);
+        }
+
+        .cta-btn {
+            background: var(--primary-color);
+            color: white;
+            border-color: transparent;
+            font-weight: 600;
+            padding: 12px 22px;
+        }
+
+        .cta-btn:hover {
+            background: var(--primary-hover);
+            border-color: transparent;
         }
 
         .content {
-            background: white;
-            border-radius: 15px;
-            padding: 40px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            background: transparent;
+            padding: 0;
+            margin-bottom: 0;
+            min-width: 0;
+        }
+
+        /* Two-column guide: sticky TOC on the left, sections on the right */
+        .guide-layout {
+            display: grid;
+            grid-template-columns: 240px minmax(0, 1fr);
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* Every section is its own quiet panel, like the app's cards */
+        .content .section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+        }
+
+        .content .section:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Presentation-style learning sections */
+        .content .section.slide {
+            padding: 32px;
+        }
+
+        .content .section.slide > h2 {
+            font-size: 1.75rem;
+        }
+
+        .content .section.slide .screenshot,
+        .content .section.slide video {
+            margin-top: 24px;
+        }
+
+
+        /* Inner callout panels flatten inside section panels */
+        .content .section .why-pomodoro,
+        .content .section .install-section,
+        .content .section .google-sheets-section {
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            padding: 0;
+            margin: 0;
         }
 
         .section {
@@ -83,63 +153,66 @@
         }
 
         h2 {
-            font-size: 2.2rem;
-            color: #ff6b6b;
-            margin-bottom: 20px;
-            border-bottom: 3px solid #ff6b6b;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--dark-color);
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
             padding-bottom: 10px;
         }
 
         h3 {
-            font-size: 1.6rem;
-            color: #4ecdc4;
-            margin-bottom: 15px;
-            margin-top: 30px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--dark-color);
+            margin-bottom: 12px;
+            margin-top: 28px;
         }
 
         h4 {
-            font-size: 1.3rem;
-            color: #555;
-            margin-bottom: 10px;
-            margin-top: 20px;
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--dark-color);
+            margin-bottom: 8px;
+            margin-top: 18px;
         }
 
         p {
-            margin-bottom: 15px;
-            font-size: 1.1rem;
+            margin-bottom: 14px;
+            font-size: 1rem;
+        }
+
+        a {
+            color: var(--primary-color);
         }
 
         .highlight {
-            background: linear-gradient(120deg, #ff6b6b 0%, #4ecdc4 100%);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-weight: bold;
+            color: var(--primary-color);
+            font-weight: 600;
         }
 
         .feature-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-            margin: 30px 0;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin: 24px 0;
         }
 
         .feature-card {
-            background: #f8f9fa;
-            padding: 25px;
-            border-radius: 12px;
-            border-left: 5px solid #ff6b6b;
-            transition: transform 0.3s ease;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            background: #FAFAFA;
+            padding: 20px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
         }
 
         .feature-card h4 {
-            color: #ff6b6b;
+            color: var(--dark-color);
             margin-top: 0;
+        }
+
+        .feature-card p {
+            color: var(--text-light);
+            margin-bottom: 0;
         }
 
         .step-list {
@@ -150,41 +223,43 @@
 
         .step-list li {
             counter-increment: step-counter;
-            margin-bottom: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 10px;
+            margin-bottom: 12px;
+            padding: 16px 20px;
+            background: #FAFAFA;
+            border: 1px solid var(--border);
+            border-radius: 8px;
             position: relative;
-            padding-left: 70px;
+            padding-left: 64px;
         }
 
         .step-list li::before {
             content: counter(step-counter);
             position: absolute;
-            left: 20px;
-            top: 20px;
-            background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
+            left: 18px;
+            top: 18px;
+            background: var(--primary-color);
             color: white;
-            width: 35px;
-            height: 35px;
+            width: 28px;
+            height: 28px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            font-size: 1.1rem;
+            font-weight: 600;
+            font-size: 0.95rem;
         }
 
         .install-section {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
-            margin: 30px 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-color);
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
         }
 
         .install-section h3 {
-            color: white;
+            color: var(--dark-color);
         }
 
         .install-grid {
@@ -195,22 +270,23 @@
         }
 
         .install-card {
-            background: rgba(255, 255, 255, 0.1);
+            background: #FAFAFA;
+            border: 1px solid var(--border);
             padding: 20px;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
+            border-radius: 8px;
         }
 
         .why-pomodoro {
-            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
-            margin: 30px 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-color);
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
         }
 
         .why-pomodoro h3 {
-            color: white;
+            color: var(--dark-color);
         }
 
         .benefits-list {
@@ -232,92 +308,88 @@
         }
 
         .google-sheets-section {
-            background: #f8f9fa;
-            border: 2px solid #667eea;
-            color: #333;
-            padding: 30px;
-            border-radius: 15px;
-            margin: 30px 0;
-            position: relative;
-        }
-
-        .google-sheets-section::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 5px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 15px 15px 0 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-color);
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
         }
 
         .google-sheets-section h2 {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: var(--dark-color);
+            border-bottom-color: var(--border);
         }
 
         .google-sheets-section h3 {
-            color: #667eea;
+            color: var(--dark-color);
         }
 
         .code-block {
-            background: rgba(0, 0, 0, 0.1);
-            padding: 15px;
-            border-radius: 8px;
+            background: var(--light-color);
+            border: 1px solid var(--border);
+            padding: 14px;
+            border-radius: 6px;
             font-family: 'Courier New', monospace;
-            margin: 15px 0;
+            font-size: 0.9rem;
+            margin: 14px 0;
             overflow-x: auto;
         }
 
         .warning {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 15px;
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+            color: #92400E;
+            padding: 14px 16px;
             border-radius: 8px;
-            margin: 20px 0;
+            margin: 18px 0;
         }
 
         .tip {
-            background: #d1ecf1;
-            border: 1px solid #bee5eb;
-            color: #0c5460;
-            padding: 15px;
+            background: #FDF2F2;
+            border: 1px solid #F3D3D3;
+            color: var(--text-color);
+            padding: 14px 16px;
             border-radius: 8px;
-            margin: 20px 0;
+            margin: 18px 0;
         }
 
         .faq-item {
-            margin-bottom: 25px;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
+            margin-bottom: 12px;
+            background: #FAFAFA;
+            border: 1px solid var(--border);
+            padding: 16px 20px;
+            border-radius: 8px;
+        }
+
+        .faq-item p {
+            color: var(--text-light);
+            margin-bottom: 0;
         }
 
         .faq-question {
-            font-weight: bold;
-            color: #ff6b6b;
-            font-size: 1.2rem;
-            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--dark-color);
+            font-size: 1.05rem;
+            margin-bottom: 8px;
         }
 
         .screenshot-placeholder {
-            background: #e9ecef;
-            border: 2px dashed #adb5bd;
-            border-radius: 10px;
+            background: var(--light-color);
+            border: 1px dashed #C9CED6;
+            border-radius: 8px;
             padding: 40px;
             text-align: center;
             margin: 20px 0;
-            color: #6c757d;
+            color: var(--text-light);
         }
 
         .screenshot {
             width: 100%;
             max-width: 800px;
             height: auto;
-            border-radius: 10px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
             margin: 20px auto;
             display: block;
         }
@@ -332,19 +404,28 @@
 
         /* Table of Contents Styles */
         .toc-container {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            border-left: 5px solid #ff6b6b;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 0;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+
+        .toc-list a.active {
+            background: #FDF2F2;
+            color: var(--primary-color);
+            font-weight: 600;
         }
 
         .toc-title {
-            font-size: 1.5rem;
-            color: #ff6b6b;
-            margin-bottom: 20px;
-            font-weight: bold;
+            font-size: 1.25rem;
+            color: var(--dark-color);
+            margin-bottom: 16px;
+            font-weight: 600;
         }
 
         .toc-list {
@@ -358,19 +439,18 @@
         }
 
         .toc-list a {
-            color: #4ecdc4;
+            color: var(--text-color);
             text-decoration: none;
             font-weight: 500;
             display: block;
             padding: 8px 12px;
-            border-radius: 8px;
-            transition: all 0.3s ease;
+            border-radius: 6px;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
         .toc-list a:hover {
-            background: #f8f9fa;
-            color: #ff6b6b;
-            transform: translateX(5px);
+            background: #FDF2F2;
+            color: var(--primary-color);
         }
 
         .toc-list .toc-subsection {
@@ -383,16 +463,16 @@
             position: fixed;
             bottom: 30px;
             right: 30px;
-            background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
+            background: var(--primary-color);
             color: white;
             border: none;
-            width: 50px;
-            height: 50px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
             cursor: pointer;
-            font-size: 1.2rem;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
+            font-size: 1.1rem;
+            box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12);
+            transition: background-color 0.2s ease, opacity 0.2s ease;
             z-index: 1000;
             opacity: 0;
             visibility: hidden;
@@ -404,13 +484,54 @@
         }
 
         .back-to-top:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+            background: var(--primary-hover);
         }
 
         /* Section IDs for navigation */
         .section {
             scroll-margin-top: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .guide-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .toc-container {
+                top: 0;
+                z-index: 20;
+                max-height: none;
+                padding: 12px 16px;
+            }
+
+            .toc-title {
+                font-size: 1rem;
+                margin-bottom: 8px;
+            }
+
+            .toc-list {
+                display: flex;
+                gap: 4px;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+
+            .toc-list li {
+                margin-bottom: 0;
+                white-space: nowrap;
+            }
+
+            .toc-list .toc-subsection {
+                margin-left: 0;
+            }
+
+            .content .section, .content .section.slide {
+                padding: 20px;
+            }
+
+            .section {
+                scroll-margin-top: 130px;
+            }
         }
 
         @media (max-width: 768px) {
@@ -515,12 +636,14 @@
             <a href="index.html" class="back-btn">← Back to Timer</a>
         </div>
 
+        <div class="guide-layout">
         <!-- Table of Contents -->
-        <div class="toc-container">
+        <aside class="toc-container">
             <div class="toc-title">📋 Table of Contents</div>
             <ul class="toc-list">
                 <li><a href="#why-pomodoro">🧠 Why the Pomodoro Technique Works</a></li>
                 <li><a href="#getting-started">🚀 Getting Started</a></li>
+                <li><a href="#video-walkthrough">📺 Video Walkthrough</a></li>
                 <li><a href="#key-features">🔧 Key Features</a>
                     <ul class="toc-list">
                         <li class="toc-subsection"><a href="#settings">⚙️ Settings & Customization</a></li>
@@ -533,10 +656,10 @@
                 <li><a href="#privacy">🔒 Privacy & Data Storage</a></li>
                 <li><a href="#ready">🎉 Ready to Start</a></li>
             </ul>
-        </div>
+        </aside>
 
         <div class="content">
-            <div class="section" id="why-pomodoro">
+            <div class="section slide" id="why-pomodoro">
                 <div class="why-pomodoro">
                     <h2>🧠 Why the Pomodoro Technique Works</h2>
                     <p>The Pomodoro Technique, developed by Francesco Cirillo in the late 1980s, is a scientifically-backed time management method that breaks work into focused 25-minute intervals. Here's why it's so effective:</p>
@@ -566,41 +689,55 @@
                 </div>
             </div>
 
-            <div class="section" id="getting-started">
+            <div class="section slide" id="getting-started">
                 <h2>🚀 Getting Started</h2>
 
                 <h3>Quick Start Guide</h3>
+                <p>The app has two views. <strong>Plan</strong> is for organizing tasks — the timer is hidden so it adds no noise. <strong>Focus</strong> is for working — one task, one timer, nothing else. Use the Plan/Focus switch at the top, or just press ▶ on a task.</p>
                 <ol class="step-list">
                     <li>
-                        <h4>Add Your First Task</h4>
-                        <p>Type a task you want to work on in the "Add a new task..." field and click "Add". Be specific about what you want to accomplish.</p>
+                        <h4>Plan Your Tasks</h4>
+                        <p>Switch to <strong>Plan</strong> and add your tasks in the "Add a new task..." field. Double-click any task name to rename it inline (Enter saves, Esc cancels). Made a list you're happy with? You're ready.</p>
                     </li>
                     <li>
-                        <h4>Select Your Task</h4>
-                        <p>Click on the task from your list to select it. The selected task will be highlighted and appear as your "Current Task".</p>
+                        <h4>Start With One Click</h4>
+                        <p>Click the red ▶ next to a task. That one click selects the task, switches you to Focus, and starts the session — the button becomes your commitment: <em>"I will work on this task."</em></p>
                     </li>
                     <li>
-                        <h4>Start Your First Pomodoro</h4>
-                        <p>Click the "Start" button to begin a 25-minute focused work session. The timer will count down and show your progress.</p>
+                        <h4>Work in Focus</h4>
+                        <p>The task list disappears and the timer takes the full width, with your one task shown large above it. Work only on that task. The timer keeps correct time even if you switch to another tab or app, and it restores if the page reloads.</p>
                     </li>
                     <li>
-                        <h4>Work Focused</h4>
-                        <p>Focus exclusively on your selected task. Avoid checking emails, social media, or other distractions during this time.</p>
+                        <h4>Pause or Continue</h4>
+                        <p>There is a single timer button. While running it says <strong>Pause</strong>; when paused it says <strong>Continue working on this task</strong>. Pausing brings the task list back.</p>
                     </li>
                     <li>
                         <h4>Take Your Break</h4>
-                        <p>When the timer completes, you'll get a notification. Take a 5-minute break - stretch, hydrate, or rest your eyes.</p>
+                        <p>When the timer completes, you'll get a notification. Press <strong>Start break</strong>, or <strong>Skip Break</strong> to jump straight back to work. During a break the task list is available so you can line up what's next.</p>
                     </li>
                     <li>
                         <h4>Complete or Continue</h4>
-                        <p>After your work session, decide if the task is complete (✅) or if you need another Pomodoro to finish it.</p>
+                        <p>After your work session, decide if the task is finished. The app asks, or use <strong>Complete Task</strong> during a session. Not done? Keep going — another Pomodoro is one click away.</p>
                     </li>
                 </ol>
 
-                <img src="images/timer-interface.png" alt="Main timer interface showing task selection and timer controls" class="screenshot">
+                <img src="images/timer-interface.png" alt="Timer view with a selected task and the 'I will work on this task' button" class="screenshot">
             </div>
 
-            <div class="section" id="key-features">
+            <div class="section slide" id="video-walkthrough">
+                <h2>📺 Video Walkthrough</h2>
+                <p>Watch the full flow in about a minute: planning tasks, renaming one, starting with one click, pausing and continuing, leaving the tab, and taking a break.</p>
+                <video controls preload="metadata" poster="images/active-session.png" style="width: 100%; border-radius: 12px; background: #000;">
+                    <source src="videos/pomodoro-walkthrough.mp4" type="video/mp4">
+                    Your browser does not support embedded video. <a href="videos/pomodoro-walkthrough.mp4">Download the walkthrough video</a> instead.
+                </video>
+                <img src="images/plan-mode.png" alt="Plan mode showing only the task list, without the timer" class="screenshot">
+                <p style="text-align: center; margin-top: 10px; color: #5F6B7A; font-style: italic;">
+                    Plan mode: just your tasks. Press ▶ on any task to jump straight into Focus.
+                </p>
+            </div>
+
+            <div class="section slide" id="key-features">
                 <h2>🔧 Key Features</h2>
                 <div class="feature-grid">
                     <div class="feature-card">
@@ -614,6 +751,22 @@
                     <div class="feature-card">
                         <h4>📝 Task Management</h4>
                         <p>Create, organize, and track tasks. Mark them complete when finished or delete them if no longer needed.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🗂️ Plan &amp; Focus Modes</h4>
+                        <p>Plan shows only your task list — no timer noise. Starting a session switches to Focus, where the task list disappears and the timer takes the full width with your one task shown large.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>▶️ One-Click Start</h4>
+                        <p>Press ▶ on any task to select it and start focusing immediately. A single timer button does the rest: "I will work on this task" → Pause → "Continue working on this task".</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>✏️ Inline Task Editing</h4>
+                        <p>Double-click a task name to rename it in place. Enter or clicking away saves, Esc cancels, and renames sync like any other change.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🛡️ Background-Proof Timer</h4>
+                        <p>The timer runs on an absolute end time, so it stays accurate in other tabs or apps, corrects itself when you return, and restores after a reload — completing on your next visit if it ended while you were away.</p>
                     </div>
                     <div class="feature-card">
                         <h4>📊 Progress Tracking</h4>
@@ -673,7 +826,7 @@
                 </ul>
 
                 <img src="images/settings-panel.png" alt="Settings panel showing all configuration options" class="screenshot">
-                <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                <p style="text-align: center; margin-top: 10px; color: #5F6B7A; font-style: italic;">
                     Complete settings panel with timer customization, pomodoro cycle, custom sounds, and Google Sheets integration
                 </p>
             </div>
@@ -711,7 +864,7 @@
                     </div>
 
                     <img src="images/active-session.png" alt="Pomodoro timer running during an active work session" class="screenshot">
-                    <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                    <p style="text-align: center; margin-top: 10px; color: #5F6B7A; font-style: italic;">
                         Example: Timer running with 24:37 remaining on "Write project proposal" task
                     </p>
                 </div>
@@ -782,7 +935,7 @@
                     </ul>
 
                     <img src="images/google-sheets-setup.png" alt="Google Sheets integration setup instructions modal" class="screenshot">
-                    <p style="text-align: center; margin-top: 10px; color: #666; font-style: italic;">
+                    <p style="text-align: center; margin-top: 10px; color: #5F6B7A; font-style: italic;">
                         Complete step-by-step instructions for Google Sheets integration
                     </p>
                 </div>
@@ -836,7 +989,27 @@
 
                 <div class="faq-item">
                     <div class="faq-question">Q: Can I pause a Pomodoro session?</div>
-                    <p>Yes! Click the "Pause" button to temporarily stop the timer. However, traditional Pomodoro technique discourages pausing - it's better to restart if you get interrupted.</p>
+                    <p>Yes! The single timer button becomes "Pause" while running, and "Continue working on this task" when paused. However, traditional Pomodoro technique discourages pausing - it's better to restart if you get interrupted.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Why did the task list disappear when I started?</div>
+                    <p>That's Focus mode: while a work session runs, the list hides and the timer takes the full width so you see one task only. Pause the timer (or finish/skip the session) and the list comes back. During breaks it stays visible so you can line up the next task.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: What's the difference between Plan and Focus?</div>
+                    <p>Plan is for organizing: only the task list, no timer. Focus is for working: only your current task and the timer. Switch with the Plan/Focus toggle at the top — or press ▶ on a task in Plan and you'll jump straight into Focus with the timer running.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: How do I rename a task?</div>
+                    <p>Double-click its name in the list and edit it inline. Enter or clicking away saves; Esc cancels. Empty names aren't allowed.</p>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question">Q: Does the timer keep running if I switch tabs or apps?</div>
+                    <p>Yes. The countdown is based on an absolute end time, not on counting ticks, so it stays correct while you're elsewhere and corrects itself the moment you return. If the page gets closed or reloaded mid-session, the timer restores with the right time left — and if the session ended while you were away, it completes as soon as you come back.</p>
                 </div>
 
                 <div class="faq-item">
@@ -956,9 +1129,10 @@
                 </div>
 
                 <p style="text-align: center; margin-top: 30px;">
-                    <a href="index.html" class="back-btn" style="font-size: 1.2rem; padding: 15px 30px;">🍅 Start Your First Pomodoro!</a>
+                    <a href="index.html" class="back-btn cta-btn">🍅 Start Your First Pomodoro!</a>
                 </p>
             </div>
+        </div>
         </div>
 
         <!-- Back to Top Button -->
@@ -1014,8 +1188,15 @@
             });
 
             tocLinks.forEach(link => {
-                link.style.fontWeight = link.getAttribute('href') === '#' + currentSection ? 'bold' : 'normal';
-                link.style.color = link.getAttribute('href') === '#' + currentSection ? '#ff6b6b' : '#4ecdc4';
+                const isActive = link.getAttribute('href') === '#' + currentSection;
+                link.classList.toggle('active', isActive);
+                if (isActive && window.innerWidth > 900) {
+                    // Keep the active item visible inside the sticky sidebar
+                    const sidebar = link.closest('.toc-container');
+                    if (sidebar) {
+                        sidebar.scrollTop = link.offsetTop - sidebar.clientHeight / 2;
+                    }
+                }
             });
         }
 

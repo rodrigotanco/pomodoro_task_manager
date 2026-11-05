@@ -25,6 +25,34 @@ function getDateUTC(isoString) {
     return `${year}-${month}-${day}`;
 }
 
+// Local calendar day (user-facing "today"): comparable via toDateString()
+function getTodayLocal() {
+    return new Date().toDateString();
+}
+
+function getDateLocal(isoString) {
+    return new Date(isoString).toDateString();
+}
+
+// Local day as YYYY-MM-DD for server date queries
+function getTodayLocalISODate() {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
+}
+
+// Parse a localStorage JSON array; corrupt data yields [] instead of throwing
+function parseStoredArray(key) {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.error(`Ignoring corrupt stored data for ${key}:`, error);
+        return [];
+    }
+}
+
 // SyncQueue class: Manages sync operations with debouncing to prevent race conditions
 class SyncQueue {
     constructor(processor, debounceMs = 500, storageKey = 'pomodoroSyncQueue') {
@@ -92,16 +120,18 @@ class SyncQueue {
         this.isProcessing = true;
         console.log(`SyncQueue: Processing ${this.queue.length} queued operations...`);
 
-        // Get all queued operations and clear the queue
+        // Snapshot queued operations; remove them only after successful processing
         const operations = [...this.queue];
-        this.queue = [];
-        this.saveQueue(); // Persist cleared queue
 
         try {
             // Process batch of operations
             await this.processor(operations);
+            this.queue = this.queue.filter(op => !operations.includes(op));
+            this.saveQueue();
             console.log('SyncQueue: Batch processing completed successfully');
         } catch (error) {
+            // Keep the failed operations queued (and persisted) for a later retry
+            this.saveQueue();
             console.error('SyncQueue: Error processing batch:', error);
         } finally {
             this.isProcessing = false;
@@ -179,6 +209,10 @@ class PomodoroTimer {
 
         // Sleep-resistant timer properties
         this.startTime = null;
+        this.timerEndAt = null; // Absolute end timestamp (ms) while running
+        this.sessionCompleting = false;
+        this.resumeCountdownOnInit = false;
+        this.pendingCompletionOnInit = false;
         this.wakeLock = null;
         this.worker = null;
 
@@ -194,6 +228,8 @@ class PomodoroTimer {
         };
         this.syncTimer = null;
         this.deletedTaskIds = new Map(); // Track recently deleted/completed task IDs with timestamps
+
+        this.viewMode = 'timer'; // 'timer' (focus) or 'plan'
 
         // Bulk selection state
         this.bulkSelectionMode = false;
@@ -235,10 +271,17 @@ class PomodoroTimer {
         this.pomodoroText = document.getElementById('pomodoroText');
         this.progressBar = document.getElementById('progress');
         this.startBtn = document.getElementById('startBtn');
-        this.pauseBtn = document.getElementById('pauseBtn');
+        this.startBtnIcon = document.getElementById('startBtnIcon');
+        this.startBtnLabel = document.getElementById('startBtnLabel');
         this.resetBtn = document.getElementById('resetBtn');
         this.sessionCountDisplay = document.getElementById('sessionCount');
         this.currentTaskDisplay = document.getElementById('currentTaskName');
+        this.currentTaskFocus = document.getElementById('currentTaskFocus');
+        this.mainElement = document.querySelector('main');
+        this.planViewBtn = document.getElementById('planViewBtn');
+        this.timerViewBtn = document.getElementById('timerViewBtn');
+        this.tasksSection = document.querySelector('.tasks-section');
+        this.tasksCollapsedHint = document.getElementById('tasksCollapsedHint');
 
         // Timer action buttons
         this.completeTaskBtn = document.getElementById('completeTaskBtn');
@@ -247,7 +290,8 @@ class PomodoroTimer {
 
         // Settings elements
         this.settingsBtn = document.getElementById('settingsBtn');
-        this.settingsPanel = document.getElementById('settingsPanel');
+        this.settingsModal = document.getElementById('settingsModal');
+        this.closeSettingsBtn = document.getElementById('closeSettingsBtn');
         this.workDurationInput = document.getElementById('workDuration');
         this.breakDurationInput = document.getElementById('breakDuration');
         this.longBreakDurationInput = document.getElementById('longBreakDuration');
@@ -327,9 +371,12 @@ class PomodoroTimer {
     }
 
     bindEvents() {
+        // View mode: Plan (tasks only) / Focus (timer only while working)
+        if (this.planViewBtn) this.planViewBtn.addEventListener('click', () => this.setViewMode('plan'));
+        if (this.timerViewBtn) this.timerViewBtn.addEventListener('click', () => this.setViewMode('timer'));
+
         // Timer controls
-        this.startBtn.addEventListener('click', () => this.startTimer());
-        this.pauseBtn.addEventListener('click', () => this.pauseTimer());
+        this.startBtn.addEventListener('click', () => this.toggleTimer());
         this.resetBtn.addEventListener('click', () => this.resetTimer());
 
         // Timer actions
@@ -337,8 +384,16 @@ class PomodoroTimer {
         this.skipBreakBtn.addEventListener('click', () => this.skipBreak());
 
         // Settings
-        this.settingsBtn.addEventListener('click', () => this.toggleSettings());
+        this.settingsBtn.addEventListener('click', () => this.showSettingsModal());
+        this.closeSettingsBtn.addEventListener('click', () => this.hideSettingsModal());
         this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
+
+        // Close settings modal when clicking outside
+        this.settingsModal.addEventListener('click', (e) => {
+            if (e.target === this.settingsModal) {
+                this.hideSettingsModal();
+            }
+        });
 
         // Tasks
         this.addTaskBtn.addEventListener('click', () => this.addTask());
@@ -386,22 +441,21 @@ class PomodoroTimer {
             });
         }
 
-        // Add ESC key listener to close modal
+        // Add ESC key listener to close modals
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !this.setupModal.classList.contains('hidden')) {
-                this.hideSetupModal();
+            if (e.key === 'Escape') {
+                if (this.setupModal?.classList.contains('active')) this.hideSetupModal();
+                if (this.settingsModal?.classList.contains('active')) this.hideSettingsModal();
             }
         });
         // this.testConnectionBtn.addEventListener('click', () => this.testConnection()); // Commented out
-
-        // Sound settings event listeners
-        this.setupSoundEventListeners();
 
         // Auto-save data periodically
         this.autoSaveInterval = setInterval(() => this.saveData(), PomodoroTimer.AUTO_SAVE_INTERVAL);
 
         // Flush sync queue before page unload to prevent data loss
         window.addEventListener('beforeunload', async (e) => {
+            this.saveTimerState();
             console.log('🔄 Page unload detected, flushing sync queue...');
             // Flush the queue synchronously
             if (this.syncQueue && this.syncQueue.queue.length > 0) {
@@ -410,85 +464,6 @@ class PomodoroTimer {
                 await this.syncQueue.flush();
             }
         });
-    }
-
-    setupSoundEventListeners() {
-        // Get all volume sliders and set up real-time display updates
-        const volumeSliders = document.querySelectorAll('.volume-slider');
-        volumeSliders.forEach(slider => {
-            slider.addEventListener('input', (e) => {
-                const volumeDisplay = e.target.nextElementSibling;
-                if (volumeDisplay && volumeDisplay.classList.contains('volume-value')) {
-                    volumeDisplay.textContent = `${e.target.value}%`;
-                }
-            });
-        });
-
-        // Set up file input handlers for all 5 sound types
-        if (this.shortBreakSoundInput) {
-            this.shortBreakSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'short-break'));
-        }
-        if (this.longBreakSoundInput) {
-            this.longBreakSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'long-break'));
-        }
-        if (this.workStartSoundInput) {
-            this.workStartSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'work-start'));
-        }
-        if (this.taskCompleteSoundInput) {
-            this.taskCompleteSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'task-complete'));
-        }
-        if (this.dailyResetSoundInput) {
-            this.dailyResetSoundInput.addEventListener('change', (e) => this.handleSoundFileUpload(e, 'daily-reset'));
-        }
-    }
-
-    handleSoundFileUpload(event, type) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        // Validate file size (< 5MB)
-        const maxSize = 5 * 1024 * 1024; // 5MB in bytes
-        if (file.size > maxSize) {
-            showToast('File size must be less than 5MB', 'error');
-            event.target.value = ''; // Clear the input
-            return;
-        }
-
-        // Validate file type
-        if (!file.type.startsWith('audio/')) {
-            showToast('Please select an audio file', 'error');
-            event.target.value = ''; // Clear the input
-            return;
-        }
-
-        // Read file as data URL
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            this.soundSettings[type].file = e.target.result;
-            this.soundSettings[type].fileName = file.name;
-
-            // Update filename display based on sound type
-            const nameDisplayMap = {
-                'short-break': this.shortBreakSoundName,
-                'long-break': this.longBreakSoundName,
-                'work-start': this.workStartSoundName,
-                'task-complete': this.taskCompleteSoundName,
-                'daily-reset': this.dailyResetSoundName
-            };
-
-            const nameDisplay = nameDisplayMap[type];
-            if (nameDisplay) {
-                nameDisplay.textContent = file.name;
-            }
-
-            showToast(`Sound file uploaded: ${file.name}`, 'success');
-            this.saveData();
-        };
-        reader.onerror = () => {
-            showToast('Failed to read audio file', 'error');
-            event.target.value = ''; // Clear the input
-        };
-        reader.readAsDataURL(file);
     }
 
     async initializeSleepResistance() {
@@ -504,8 +479,14 @@ class PomodoroTimer {
 
         // Listen for visibility changes to detect when app becomes visible again
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && this.isRunning) {
+            if (document.hidden) {
+                // Going to another tab/app: persist the absolute end time so
+                // the session survives throttling, freezing, or page kill.
+                this.saveTimerState();
+            } else if (this.isRunning) {
                 this.correctTimerAfterWakeup();
+                // Wake locks are released automatically when hidden; re-acquire
+                this.requestWakeLock();
             }
         });
 
@@ -515,51 +496,153 @@ class PomodoroTimer {
                 this.correctTimerAfterWakeup();
             }
         });
+
+        // Persist timer state when the page is hidden/unloaded by the OS
+        window.addEventListener('pagehide', () => this.saveTimerState());
+
+        // Resume a countdown restored from storage (worker now exists)
+        if (this.resumeCountdownOnInit && this.isRunning) {
+            this.beginCountdown();
+            this.requestWakeLock();
+        }
+        if (this.pendingCompletionOnInit) {
+            setTimeout(() => {
+                if (this.isRunning) this.completeSession();
+            }, 50);
+        }
+    }
+
+    // Remaining seconds derived from the absolute end time; immune to
+    // interval throttling/freezing while the tab or app is in background.
+    getRemainingSeconds() {
+        if (this.isRunning && this.timerEndAt) {
+            return Math.max(0, Math.ceil((this.timerEndAt - Date.now()) / 1000));
+        }
+        return this.timeLeft;
+    }
+
+    saveTimerState() {
+        try {
+            localStorage.setItem('pomodoroTimerState', JSON.stringify({
+                isRunning: this.isRunning,
+                isWorkSession: this.isWorkSession,
+                isLongBreak: this.isLongBreak,
+                selectedTaskId: this.selectedTaskId,
+                currentDuration: this.currentDuration,
+                timeLeft: this.getRemainingSeconds(),
+                timerEndAt: this.isRunning ? this.timerEndAt : null,
+                savedAt: Date.now()
+            }));
+        } catch (error) {
+            console.error('Failed to save timer state:', error);
+        }
+    }
+
+    restoreTimerState() {
+        let state = null;
+        try {
+            state = JSON.parse(localStorage.getItem('pomodoroTimerState') || 'null');
+        } catch (error) {
+            console.error('Ignoring corrupt timer state:', error);
+        }
+        if (!state || typeof state !== 'object') return;
+
+        this.isWorkSession = state.isWorkSession !== false;
+        this.isLongBreak = !!state.isLongBreak;
+        this.selectedTaskId = state.selectedTaskId || null;
+        if (Number.isFinite(state.currentDuration) && state.currentDuration > 0) {
+            this.currentDuration = state.currentDuration;
+        }
+
+        if (state.isRunning && Number.isFinite(state.timerEndAt)) {
+            this.timerEndAt = state.timerEndAt;
+            const remaining = Math.max(0, Math.ceil((state.timerEndAt - Date.now()) / 1000));
+            this.isRunning = true;
+            // Keep elapsed accounting consistent for an in-progress session
+            this.startTime = Date.now() - Math.max(0, this.currentDuration - remaining) * 1000;
+            this.timeLeft = remaining;
+            if (remaining <= 0) {
+                // Session ended while the app was away/killed: complete it once
+                this.timeLeft = 0;
+                this.pendingCompletionOnInit = true;
+            } else {
+                this.resumeCountdownOnInit = true;
+            }
+        } else {
+            this.isRunning = false;
+            this.timerEndAt = null;
+            if (Number.isFinite(state.timeLeft)) this.timeLeft = state.timeLeft;
+        }
+
+        this.renderTasks();
+        this.updateDisplay();
+    }
+
+    // Start the worker (preferred) or timestamp-based fallback countdown.
+    beginCountdown() {
+        if (this.worker) {
+            this.worker.postMessage({
+                action: 'start',
+                data: { endAt: this.timerEndAt }
+            });
+        } else {
+            clearInterval(this.timer);
+            this.timer = setInterval(() => {
+                if (!this.isRunning) return;
+                this.timeLeft = this.getRemainingSeconds();
+                this.updateDisplay();
+                if (this.timeLeft <= 0) {
+                    this.completeSession();
+                }
+            }, 250);
+        }
     }
 
     initializeWorker() {
         // Create a Web Worker for more reliable background timing
         const workerCode = `
             let timerInterval = null;
-            let startTime = null;
-            let duration = 0;
+            let endAt = null;
+
+            function remainingMs() {
+                return endAt ? Math.max(0, endAt - Date.now()) : 0;
+            }
 
             self.addEventListener('message', function(e) {
                 const { action, data } = e.data;
 
                 if (action === 'start') {
-                    startTime = Date.now();
-                    duration = data.duration * 1000; // Convert to milliseconds
+                    // Absolute end time: ticks stay correct even if this
+                    // worker was throttled or frozen while in background.
+                    if (timerInterval) clearInterval(timerInterval);
+                    endAt = data.endAt || (Date.now() + data.duration * 1000);
 
-                    timerInterval = setInterval(() => {
-                        const elapsed = Date.now() - startTime;
-                        const remaining = Math.max(0, duration - elapsed);
-
+                    const tick = () => {
+                        const remaining = remainingMs();
                         self.postMessage({
                             type: 'tick',
-                            timeLeft: Math.ceil(remaining / 1000),
-                            elapsed: Math.floor(elapsed / 1000)
+                            timeLeft: Math.ceil(remaining / 1000)
                         });
-
                         if (remaining <= 0) {
                             clearInterval(timerInterval);
+                            timerInterval = null;
                             self.postMessage({ type: 'complete' });
                         }
-                    }, 1000);
+                    };
+                    tick();
+                    timerInterval = setInterval(tick, 250);
 
                 } else if (action === 'stop') {
                     if (timerInterval) {
                         clearInterval(timerInterval);
                         timerInterval = null;
                     }
+                    endAt = null;
                 } else if (action === 'getStatus') {
-                    if (startTime) {
-                        const elapsed = Date.now() - startTime;
-                        const remaining = Math.max(0, duration - elapsed);
+                    if (endAt) {
                         self.postMessage({
                             type: 'status',
-                            timeLeft: Math.ceil(remaining / 1000),
-                            elapsed: Math.floor(elapsed / 1000)
+                            timeLeft: Math.ceil(remainingMs() / 1000)
                         });
                     }
                 }
@@ -572,17 +655,19 @@ class PomodoroTimer {
             this.worker = new Worker(this.workerBlobURL);
 
             this.worker.addEventListener('message', (e) => {
-                const { type, timeLeft, elapsed } = e.data;
+                const { type, timeLeft } = e.data;
 
-                if (type === 'tick') {
-                    this.timeLeft = timeLeft;
+                // Ignore stale worker messages after pause/reset/skip
+                if (!this.isRunning) return;
+
+                if (type === 'tick' || type === 'status') {
+                    // The absolute end time is authoritative, not the payload
+                    this.timeLeft = this.timerEndAt ? this.getRemainingSeconds() : timeLeft;
                     this.updateDisplay();
                 } else if (type === 'complete') {
-                    this.completeSession();
-                } else if (type === 'status') {
-                    // Update timer with corrected time after wake-up
-                    this.timeLeft = timeLeft;
+                    this.timeLeft = 0;
                     this.updateDisplay();
+                    this.completeSession();
                 }
             });
 
@@ -621,34 +706,16 @@ class PomodoroTimer {
     }
 
     correctTimerAfterWakeup() {
-        if (!this.isRunning || !this.startTime) return;
+        if (!this.isRunning || !this.timerEndAt) return;
 
-        // Calculate how much time should have passed
-        const now = Date.now();
-        const elapsedMs = now - this.startTime;
-        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+        // Remaining time comes from the absolute end time, so it is correct
+        // after any background duration and after pause/resume cycles.
+        this.timeLeft = this.getRemainingSeconds();
+        this.updateDisplay();
 
-        // Calculate what the time left should be
-        const correctTimeLeft = Math.max(0, this.currentDuration - elapsedSeconds);
-
-        // If there's a significant difference, correct it
-        const timeDifference = Math.abs(this.timeLeft - correctTimeLeft);
-
-        if (timeDifference > 2) { // More than 2 seconds difference
-            console.log(`Timer correction: was ${this.timeLeft}s, should be ${correctTimeLeft}s`);
-            this.timeLeft = correctTimeLeft;
-
-            // Ask worker for status to sync
-            if (this.worker) {
-                this.worker.postMessage({ action: 'getStatus' });
-            }
-
-            this.updateDisplay();
-
-            // Check if session should be complete
-            if (this.timeLeft <= 0) {
-                this.completeSession();
-            }
+        // Session ended while the user was in another tab/app
+        if (this.timeLeft <= 0) {
+            this.completeSession();
         }
     }
 
@@ -794,17 +861,23 @@ class PomodoroTimer {
 
     loadData() {
         const savedData = localStorage.getItem('pomodoroData');
-        if (savedData) {
-            const data = JSON.parse(savedData);
-            this.tasks = (data.tasks || []).map(task => ({
+        let data = null;
+        try {
+            data = savedData ? JSON.parse(savedData) : null;
+        } catch (error) {
+            console.error('Ignoring corrupt pomodoroData:', error);
+            localStorage.removeItem('pomodoroData');
+        }
+        if (data && typeof data === 'object') {
+            this.tasks = (Array.isArray(data.tasks) ? data.tasks : []).map(task => ({
                 ...task,
                 version: task.version || 1,  // Add version for old tasks without it
                 lastModified: task.lastModified || task.createdAt || new Date().toISOString(),
                 deviceId: task.deviceId || this.deviceId
             }));
-            this.completedTasks = data.completedTasks || [];
-            this.workSessions = data.workSessions || [];
-            this.archivedTasks = data.archivedTasks || [];
+            this.completedTasks = Array.isArray(data.completedTasks) ? data.completedTasks : [];
+            this.workSessions = Array.isArray(data.workSessions) ? data.workSessions : [];
+            this.archivedTasks = Array.isArray(data.archivedTasks) ? data.archivedTasks : [];
             this.sessionCount = data.sessionCount || 0;
             this.userEmail = data.userEmail || '';
             this.notificationsEnabled = data.notificationsEnabled !== undefined ? data.notificationsEnabled : true;
@@ -813,7 +886,8 @@ class PomodoroTimer {
             this.breakDuration = data.breakDuration || 5 * 60;
             this.longBreakDuration = data.longBreakDuration || 15 * 60;
             this.longBreakInterval = data.longBreakInterval !== undefined ? data.longBreakInterval : 4;
-            this.consecutiveWorkSessions = data.consecutiveWorkSessions || 0;
+            this.completedPomodoros = data.completedPomodoros ?? data.consecutiveWorkSessions ?? 0;
+            this.consecutiveWorkSessions = this.completedPomodoros;
             this.isLongBreak = data.isLongBreak || false;
             this.lastSyncTime = data.lastSyncTime || null;
 
@@ -857,6 +931,8 @@ class PomodoroTimer {
         this.updateStats();
         this.updateActivityLog();
         this.updateSyncButton();
+        this.restoreTimerState();
+        this.restoreViewMode();
     }
 
     saveData() {
@@ -884,15 +960,23 @@ class PomodoroTimer {
         localStorage.setItem('pomodoroData', JSON.stringify(data));
     }
 
-    toggleSettings() {
-        this.settingsPanel.classList.toggle('hidden');
+    showSettingsModal() {
+        this.settingsModal.classList.add('active');
+    }
+
+    hideSettingsModal() {
+        this.settingsModal.classList.remove('active');
     }
 
     saveSettings() {
-        this.workDuration = parseInt(this.workDurationInput.value) * 60;
-        this.breakDuration = parseInt(this.breakDurationInput.value) * 60;
-        this.longBreakDuration = parseInt(this.longBreakDurationInput.value) * 60;
-        this.longBreakInterval = parseInt(this.longBreakIntervalInput.value);
+        const clampMinutes = (value, fallbackMinutes, min, max) => {
+            const parsed = parseInt(value, 10);
+            return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallbackMinutes;
+        };
+        this.workDuration = clampMinutes(this.workDurationInput.value, this.workDuration / 60, 1, 60) * 60;
+        this.breakDuration = clampMinutes(this.breakDurationInput.value, this.breakDuration / 60, 1, 30) * 60;
+        this.longBreakDuration = clampMinutes(this.longBreakDurationInput.value, this.longBreakDuration / 60, 1, 60) * 60;
+        this.longBreakInterval = clampMinutes(this.longBreakIntervalInput.value, this.longBreakInterval, 0, 8);
         this.userEmail = this.userEmailInput.value;
         this.notificationsEnabled = this.enableNotificationsInput.checked;
         this.googleSheetsWebhook = this.googleSheetsWebhookInput.value;
@@ -910,7 +994,7 @@ class PomodoroTimer {
 
         this.saveData();
         this.updateSyncButton();
-        this.settingsPanel.classList.add('hidden');
+        this.hideSettingsModal();
         this.addActivity('⚙️ Settings updated');
         showToast('Settings saved successfully', 'success');
     }
@@ -932,6 +1016,15 @@ class PomodoroTimer {
             const volumeValue = fileInput?.closest('.sound-setting-item')?.querySelector('.volume-value');
             const testBtn = document.querySelector(`.test-sound-btn[data-sound-type="${type}"]`);
             const resetBtn = document.querySelector(`.reset-sound-btn[data-sound-type="${type}"]`);
+
+            // Seed controls from the persisted AlertSoundManager config
+            const savedConfig = window.alertSoundManager?.soundTypes?.[type];
+            if (savedConfig) {
+                if (volumeSlider) volumeSlider.value = Math.round((savedConfig.volume ?? 1) * 100);
+                if (volumeValue) volumeValue.textContent = `${Math.round((savedConfig.volume ?? 1) * 100)}%`;
+                if (durationInput) durationInput.value = Math.round((savedConfig.duration ?? 5000) / 1000);
+                if (fileNameSpan && savedConfig.fileName) fileNameSpan.textContent = savedConfig.fileName;
+            }
 
             // File upload handler
             if (fileInput) {
@@ -970,15 +1063,9 @@ class PomodoroTimer {
                 volumeSlider.addEventListener('change', async (e) => {
                     const volume = parseFloat(e.target.value) / 100;
                     const duration = durationInput ? parseInt(durationInput.value) * 1000 : 5000;
-                    const currentConfig = window.alertSoundManager.soundTypes[type];
-
-                    if (currentConfig.file) {
-                        // Re-save with new volume
-                        const response = await fetch(currentConfig.file);
-                        const blob = await response.blob();
-                        const file = new File([blob], currentConfig.fileName || 'sound.mp3');
-                        await window.alertSoundManager.saveSound(type, file, volume, duration);
-                    }
+                    // Persist for default and custom sounds alike; null file keeps any custom file
+                    await window.alertSoundManager.loadSound(type);
+                    await window.alertSoundManager.saveSound(type, null, volume, duration, window.alertSoundManager.soundTypes[type].enabled);
                 });
             }
 
@@ -987,15 +1074,9 @@ class PomodoroTimer {
                 durationInput.addEventListener('change', async (e) => {
                     const duration = parseInt(e.target.value) * 1000;
                     const volume = volumeSlider ? parseFloat(volumeSlider.value) / 100 : 1.0;
-                    const currentConfig = window.alertSoundManager.soundTypes[type];
-
-                    if (currentConfig.file) {
-                        // Re-save with new duration
-                        const response = await fetch(currentConfig.file);
-                        const blob = await response.blob();
-                        const file = new File([blob], currentConfig.fileName || 'sound.mp3');
-                        await window.alertSoundManager.saveSound(type, file, volume, duration);
-                    }
+                    // Persist for default and custom sounds alike; null file keeps any custom file
+                    await window.alertSoundManager.loadSound(type);
+                    await window.alertSoundManager.saveSound(type, null, volume, duration, window.alertSoundManager.soundTypes[type].enabled);
                 });
             }
 
@@ -1154,66 +1235,104 @@ class PomodoroTimer {
         }
     }
 
+    // The one timer button: starts, pauses, and resumes by state
+    toggleTimer() {
+        if (this.isRunning) {
+            this.pauseTimer();
+        } else {
+            this.startTimer();
+        }
+    }
+
+    updatePrimaryButton() {
+        if (!this.startBtn) return;
+        let label;
+        let icon = 'fa-play';
+        let disabled = false;
+
+        if (this.isRunning) {
+            label = 'Pause';
+            icon = 'fa-pause';
+        } else if (this.isWorkSession) {
+            if (!this.selectedTaskId) {
+                label = 'Select a task to start';
+                disabled = true;
+            } else if (this.timeLeft < this.currentDuration) {
+                label = 'Continue working on this task';
+            } else {
+                label = 'I will work on this task';
+            }
+        } else if (this.timeLeft < this.currentDuration) {
+            label = 'Continue break';
+        } else {
+            label = 'Start break';
+        }
+
+        if (this.startBtnLabel) this.startBtnLabel.textContent = label;
+        if (this.startBtnIcon) this.startBtnIcon.className = `fas ${icon}`;
+        this.startBtn.disabled = disabled;
+        this.startBtn.classList.toggle('is-running', this.isRunning);
+    }
+
     startTimer() {
+        if (this.isRunning) return;
+        this.sessionCompleting = false;
+
         // Prevent starting work session without a selected task
         if (this.isWorkSession && !this.selectedTaskId) {
             alert('Please select a task before starting a work session!');
             return;
         }
 
-        this.isRunning = true;
-        this.startBtn.disabled = true;
-        this.pauseBtn.disabled = false;
+        // Validate the selected task before changing any timer state
+        let task = null;
+        if (this.isWorkSession && this.selectedTaskId) {
+            task = this.tasks.find(t => t.id === this.selectedTaskId);
+            if (!task) {
+                console.warn('Selected task not found, clearing selection');
+                this.selectedTaskId = null;
+                this.updateDisplay();
+                return;
+            }
+        }
 
-        // Record start time for sleep-resistant timing
-        this.startTime = Date.now();
+        // Starting always brings the timer into view (Focus)
+        if (this.viewMode !== 'timer') this.setViewMode('timer');
+
+        this.isRunning = true;
+
+        // Absolute end time + segment start offset by already-elapsed time,
+        // so pause/resume and background time are accounted correctly.
+        this.timerEndAt = Date.now() + this.timeLeft * 1000;
+        this.startTime = Date.now() - Math.max(0, this.currentDuration - this.timeLeft) * 1000;
 
         // Request wake lock to prevent sleep
         this.requestWakeLock();
 
-        // Start Web Worker timer for background operation
-        if (this.worker) {
-            this.worker.postMessage({
-                action: 'start',
-                data: { duration: this.timeLeft }
-            });
-        } else {
-            // Fallback timer for browsers without Web Worker support
-            this.timer = setInterval(() => {
-                this.timeLeft--;
-                this.updateDisplay();
+        // Start worker (or timestamp fallback) for background operation
+        this.beginCountdown();
+        this.saveTimerState();
 
-                if (this.timeLeft <= 0) {
-                    this.completeSession();
-                }
-            }, 1000);
-        }
-
-        if (this.isWorkSession && this.selectedTaskId) {
-            const task = this.tasks.find(t => t.id === this.selectedTaskId);
-            if (task) {
-                this.addActivity(`🍅 Started work session: ${task.text}`);
-            } else {
-                console.warn('Selected task not found, clearing selection');
-                this.selectedTaskId = null;
-                this.pauseTimer();
-                return;
-            }
+        if (task) {
+            this.addActivity(`🍅 Started work session: ${task.text}`);
         } else {
             this.addActivity('☕ Started break');
         }
 
         // Update pomodoro progress indicator to show active state
         this.updatePomodoroProgress();
+        this.updateDisplay(); // Enters focus mode (collapses the task list)
     }
 
     pauseTimer() {
+        // Freeze the remaining time before tearing down the countdown
+        if (this.timerEndAt) this.timeLeft = this.getRemainingSeconds();
         this.isRunning = false;
-        this.startBtn.disabled = false;
-        this.pauseBtn.disabled = true;
+        this.timerEndAt = null;
 
         // Clear both timers
         clearInterval(this.timer);
+        this.timer = null;
 
         // Stop Web Worker
         if (this.worker) {
@@ -1226,16 +1345,18 @@ class PomodoroTimer {
         // Clear start time
         this.startTime = null;
 
+        this.saveTimerState();
+        this.updateDisplay(); // Restores the task list from focus mode
         this.addActivity('⏸️ Timer paused');
     }
 
     resetTimer() {
         this.isRunning = false;
-        this.startBtn.disabled = this.isWorkSession && !this.selectedTaskId;
-        this.pauseBtn.disabled = true;
+        this.timerEndAt = null;
 
         // Clear both timers
         clearInterval(this.timer);
+        this.timer = null;
 
         // Stop Web Worker
         if (this.worker) {
@@ -1248,8 +1369,9 @@ class PomodoroTimer {
         // Clear start time
         this.startTime = null;
 
-        this.currentDuration = this.isWorkSession ? this.workDuration : this.breakDuration;
+        this.currentDuration = this.isWorkSession ? this.workDuration : (this.isLongBreak ? this.longBreakDuration : this.breakDuration);
         this.timeLeft = this.currentDuration;
+        this.saveTimerState();
         this.updateDisplay();
         this.addActivity('🔄 Timer reset');
     }
@@ -1259,10 +1381,15 @@ class PomodoroTimer {
             return;
         }
 
+        // Enforce the minimum task time before recording or syncing anything
+        if (this.isRunning && (this.currentDuration - this.timeLeft) < PomodoroTimer.MIN_TASK_TIME) {
+            alert(`You need to spend at least ${PomodoroTimer.MIN_TASK_TIME} seconds on a task before completing it!`);
+            return;
+        }
+
         // Calculate elapsed time and create work session
         if (this.isRunning && this.startTime) {
             const elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
-            const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60)); // Minimum 1 minute for display
 
             const task = this.tasks.find(t => t.id === this.selectedTaskId);
 
@@ -1271,7 +1398,7 @@ class PomodoroTimer {
                 id: generateUUID(),
                 taskId: this.selectedTaskId,
                 taskText: task ? task.text : 'Unknown task',
-                duration: elapsedMinutes,  // Actual elapsed time
+                duration: elapsedSeconds,  // Seconds, matching completeSession/updateStats
                 completedAt: new Date().toISOString(),
                 isLongBreak: this.isLongBreak || false,
                 pomodoroCount: this.completedPomodoros
@@ -1286,7 +1413,7 @@ class PomodoroTimer {
             this.syncQueue.enqueue({ type: 'sync_work_session', data: workSession });
 
             // Log to Activity Log
-            this.syncToGoogleSheets('Work Session', workSession.taskText, elapsedMinutes)
+            this.syncToGoogleSheets('Work Session', workSession.taskText, elapsedSeconds)
                 .then(result => {
                     if (result.success) {
                         console.log('✅ Work session synced to Google Sheets:', workSession.taskText);
@@ -1312,18 +1439,25 @@ class PomodoroTimer {
             return;
         }
 
-        // Stop the current break timer
+        // Stop the current break timer (worker, wake lock, and start time too)
         this.isRunning = false;
+        this.timerEndAt = null;
         clearInterval(this.timer);
+        this.timer = null;
+        if (this.worker) {
+            this.worker.postMessage({ action: 'stop' });
+        }
+        this.releaseWakeLock();
+        this.startTime = null;
+        this.isLongBreak = false;
 
         // Switch to work session
         this.isWorkSession = true;
         this.currentDuration = this.workDuration;
         this.timeLeft = this.currentDuration;
+        this.saveTimerState();
 
         // Update UI
-        this.startBtn.disabled = !this.selectedTaskId;
-        this.pauseBtn.disabled = true;
         this.updateDisplay();
 
         this.addActivity('⏭️ Break skipped');
@@ -1488,10 +1622,15 @@ class PomodoroTimer {
     }
 
     completeSession() {
+        // Guard against duplicate completion (worker + wake-up correction)
+        if (this.sessionCompleting) return;
+        this.sessionCompleting = true;
         this.isRunning = false;
+        this.timerEndAt = null;
 
         // Clear both timers
         clearInterval(this.timer);
+        this.timer = null;
 
         // Stop Web Worker
         if (this.worker) {
@@ -1628,12 +1767,12 @@ class PomodoroTimer {
         }
 
         this.timeLeft = this.currentDuration;
-        this.startBtn.disabled = this.isWorkSession && !this.selectedTaskId;
-        this.pauseBtn.disabled = true;
         this.updateDisplay();
         this.updatePomodoroProgress(); // Update pomodoro cycle indicator
         this.updateStats();
         this.saveData();
+        this.saveTimerState();
+        this.sessionCompleting = false;
     }
 
     updateDisplay() {
@@ -1651,7 +1790,7 @@ class PomodoroTimer {
 
         // Update pomodoro progress
         if (this.longBreakInterval > 0) {
-            const current = this.consecutiveWorkSessions;
+            const current = this.completedPomodoros;
             const total = this.longBreakInterval;
             this.pomodoroText.textContent = `${current} of ${total} pomodoros`;
 
@@ -1677,19 +1816,74 @@ class PomodoroTimer {
         // Update session count
         this.sessionCountDisplay.textContent = this.sessionCount;
 
-        // Update current task
-        if (this.selectedTaskId) {
-            const task = this.tasks.find(t => t.id === this.selectedTaskId);
-            this.currentTaskDisplay.textContent = task ? task.text : 'No task selected';
-        } else {
-            this.currentTaskDisplay.textContent = 'No task selected';
+        // Update current task (shown large, above the timer)
+        const currentTask = this.selectedTaskId
+            ? this.tasks.find(t => t.id === this.selectedTaskId)
+            : null;
+        this.currentTaskDisplay.textContent = currentTask ? currentTask.text : 'No task selected';
+        if (this.currentTaskFocus) {
+            this.currentTaskFocus.classList.toggle('no-task', !currentTask);
         }
 
-        // Update start button state
-        this.startBtn.disabled = this.isRunning || (this.isWorkSession && !this.selectedTaskId);
+        // Update the single start/pause button state
+        this.updatePrimaryButton();
 
         // Update timer action buttons visibility
         this.updateTimerActions();
+
+        // Focus mode: one task only while a work session runs
+        this.updateFocusMode();
+    }
+
+    updateFocusMode() {
+        const focusMode = this.isRunning && this.isWorkSession;
+        if (this.tasksSection) {
+            this.tasksSection.classList.toggle('focus-collapsed', focusMode);
+        }
+        if (this.mainElement) {
+            this.mainElement.classList.toggle('focus-mode', focusMode);
+        }
+        if (this.tasksCollapsedHint) {
+            this.tasksCollapsedHint.classList.toggle('hidden', !focusMode);
+        }
+    }
+
+    setViewMode(mode) {
+        this.viewMode = mode === 'plan' ? 'plan' : 'timer';
+        try {
+            localStorage.setItem('pomodoroViewMode', this.viewMode);
+        } catch (error) {
+            console.error('Failed to save view mode:', error);
+        }
+        this.applyViewMode();
+    }
+
+    applyViewMode() {
+        if (this.mainElement) {
+            this.mainElement.classList.toggle('planning-mode', this.viewMode === 'plan');
+        }
+        if (this.planViewBtn) {
+            const active = this.viewMode === 'plan';
+            this.planViewBtn.classList.toggle('active', active);
+            this.planViewBtn.setAttribute('aria-pressed', String(active));
+        }
+        if (this.timerViewBtn) {
+            const active = this.viewMode !== 'plan';
+            this.timerViewBtn.classList.toggle('active', active);
+            this.timerViewBtn.setAttribute('aria-pressed', String(active));
+        }
+    }
+
+    restoreViewMode() {
+        let stored = null;
+        try {
+            stored = localStorage.getItem('pomodoroViewMode');
+        } catch (error) {
+            console.error('Failed to load view mode:', error);
+        }
+        // A work session restored mid-run always lands in Focus view
+        this.viewMode = (this.isRunning && this.isWorkSession) ? 'timer' : (stored === 'plan' ? 'plan' : 'timer');
+        this.applyViewMode();
     }
 
     updateTimerActions() {
@@ -1783,6 +1977,91 @@ class PomodoroTimer {
         this.renderTasks();
         this.updateDisplay();
         this.saveData();
+        this.saveTimerState();
+    }
+
+    // Inline edit: double-click a task name to rename it in place.
+    editTask(taskId, textElement) {
+        if (this.bulkSelectionMode) return;
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task || !textElement || textElement.querySelector('input')) return;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'task-edit-input';
+        input.value = task.text;
+        input.setAttribute('aria-label', 'Edit task name');
+
+        textElement.textContent = '';
+        textElement.appendChild(input);
+        input.focus();
+        input.select();
+
+        let finished = false;
+        const finish = (save) => {
+            if (finished) return;
+            finished = true;
+            const newText = input.value.trim();
+            if (save && newText && newText !== task.text) {
+                task.text = newText;
+                task.lastModified = new Date().toISOString();
+                task.deviceId = this.deviceId;
+                task.version = (task.version || 1) + 1;
+                this.saveData();
+                this.syncQueue.enqueue({ type: 'sync_task', data: task });
+                this.addActivity(`✏️ Edited task: ${newText}`);
+            } else if (save && !newText) {
+                showToast('Task name cannot be empty', 'error');
+            }
+            this.renderTasks();
+            this.updateDisplay();
+        };
+
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') finish(true);
+            else if (e.key === 'Escape') finish(false);
+        });
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('dblclick', (e) => e.stopPropagation());
+    }
+
+    // One-click start from Plan mode: select the task and begin focusing.
+    startTask(taskId, event) {
+        if (event) event.stopPropagation();
+        if (this.isRunning && this.isWorkSession) return; // Already focusing
+
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const sameTask = this.selectedTaskId === taskId;
+
+        // A break is running: end it so the chosen task can start now
+        if (this.isRunning && !this.isWorkSession) {
+            this.isRunning = false;
+            this.timerEndAt = null;
+            this.startTime = null;
+            clearInterval(this.timer);
+            this.timer = null;
+            if (this.worker) this.worker.postMessage({ action: 'stop' });
+            this.releaseWakeLock();
+        }
+
+        // New task, or coming from a break: fresh work session.
+        // Same task while paused mid-session: resume what's left.
+        if (!this.isWorkSession || !sameTask) {
+            this.isWorkSession = true;
+            this.isLongBreak = false;
+            this.currentDuration = this.workDuration;
+            this.timeLeft = this.currentDuration;
+        }
+
+        this.selectedTaskId = taskId;
+        this.renderTasks();
+        this.saveData();
+        this.saveTimerState();
+        this.startTimer(); // Switches to Focus view and starts the countdown
     }
 
     completeTask(taskId, event) {
@@ -1979,9 +2258,21 @@ class PomodoroTimer {
             const taskText = document.createElement('span');
             taskText.className = 'task-text';
             taskText.textContent = task.text; // Safe text content
+            taskText.title = 'Double-click to edit';
+            taskText.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                this.editTask(task.id, taskText);
+            });
 
             const taskActions = document.createElement('div');
             taskActions.className = 'task-actions';
+
+            const startBtn = document.createElement('button');
+            startBtn.className = 'task-btn start-btn';
+            startBtn.textContent = '▶';
+            startBtn.title = 'Start focusing on this task';
+            startBtn.style.display = this.bulkSelectionMode ? 'none' : 'inline-block';
+            startBtn.onclick = (event) => this.startTask(task.id, event);
 
             const completeBtn = document.createElement('button');
             completeBtn.className = 'task-btn complete-btn';
@@ -1993,12 +2284,26 @@ class PomodoroTimer {
             deleteBtn.textContent = '✗';
             deleteBtn.onclick = (event) => this.deleteTask(task.id, event);
 
+            taskActions.appendChild(startBtn);
             taskActions.appendChild(completeBtn);
             taskActions.appendChild(deleteBtn);
 
             // Only add click handler for task selection if NOT in bulk mode
             if (!this.bulkSelectionMode) {
-                taskElement.onclick = () => this.selectTask(task.id);
+                taskElement.onclick = () => {
+                    // Manual double-click detection: selecting re-renders the
+                    // row, which replaces the click target and prevents the
+                    // browser from ever firing a native dblclick here.
+                    const now = Date.now();
+                    const last = this._taskClickState;
+                    this._taskClickState = { taskId: task.id, time: now };
+                    if (last && last.taskId === task.id && now - last.time < 450) {
+                        this._taskClickState = null;
+                        this.editTask(task.id, taskText);
+                        return;
+                    }
+                    this.selectTask(task.id);
+                };
             }
 
             taskElement.appendChild(checkbox);
@@ -2011,21 +2316,21 @@ class PomodoroTimer {
     }
 
     updateStats() {
-        const today = getTodayUTC();
+        const today = getTodayLocal();
 
-        // Count today's completed tasks (using UTC for consistency)
+        // Count today's completed tasks (local calendar day, matching the report)
         const todayTasks = this.completedTasks.filter(task =>
-            getDateUTC(task.completedAt) === today
+            getDateLocal(task.completedAt) === today
         ).length;
 
-        // Count today's work sessions (using UTC for consistency)
+        // Count today's work sessions
         const todaySessions = this.workSessions.filter(session =>
-            getDateUTC(session.completedAt) === today
+            getDateLocal(session.completedAt) === today
         ).length;
 
-        // Calculate today's focus time (using UTC for consistency)
+        // Calculate today's focus time (session durations are in seconds)
         const todayFocusTime = this.workSessions
-            .filter(session => getDateUTC(session.completedAt) === today)
+            .filter(session => getDateLocal(session.completedAt) === today)
             .reduce((total, session) => total + session.duration, 0);
 
         this.todayTasksDisplay.textContent = todayTasks;
@@ -2041,7 +2346,7 @@ class PomodoroTimer {
         };
 
         // Keep only last MAX_ACTIVITY_LOG_ITEMS activities
-        const activities = JSON.parse(localStorage.getItem('pomodoroActivities') || '[]');
+        const activities = parseStoredArray('pomodoroActivities');
         activities.unshift(activity);
         activities.splice(PomodoroTimer.MAX_ACTIVITY_LOG_ITEMS);
 
@@ -2050,7 +2355,7 @@ class PomodoroTimer {
     }
 
     updateActivityLog() {
-        const activities = JSON.parse(localStorage.getItem('pomodoroActivities') || '[]');
+        const activities = parseStoredArray('pomodoroActivities');
         this.activityList.innerHTML = '';
 
         activities.slice(0, 10).forEach(activity => {
@@ -2511,6 +2816,8 @@ class PomodoroTimer {
 
         this.syncLocks.full = true;
         this.updateSyncStatus('syncing');
+        // No webhook is a neutral disabled state, not a sync failure
+        let syncFailed = false;
 
         try {
             // Sync tasks (with separate lock)
@@ -2525,6 +2832,7 @@ class PomodoroTimer {
                         }
                     } else {
                         console.error('Failed to get tasks from server:', serverResult.reason);
+                        if (this.googleSheetsWebhook) syncFailed = true;
                     }
                 } finally {
                     this.syncLocks.tasks = false;
@@ -2535,9 +2843,11 @@ class PomodoroTimer {
             if (!this.syncLocks.stats) {
                 this.syncLocks.stats = true;
                 try {
-                    await this.refreshTodayStats();
+                    const statsResult = await this.refreshTodayStats();
+                    if (statsResult && !statsResult.success && statsResult.reason !== 'no_webhook') syncFailed = true;
                 } catch (error) {
                     console.error('Stats sync error:', error);
+                    if (this.googleSheetsWebhook) syncFailed = true;
                 } finally {
                     this.syncLocks.stats = false;
                 }
@@ -2553,6 +2863,7 @@ class PomodoroTimer {
                         console.log(`✅ Synced ${archivedResult.count || 0} archived tasks from server`);
                     } else {
                         console.log('📦 Archived tasks sync skipped:', archivedResult.reason);
+                        if (this.googleSheetsWebhook) syncFailed = true;
                     }
                 } catch (error) {
                     console.error('Archived tasks sync error:', error);
@@ -2561,9 +2872,15 @@ class PomodoroTimer {
                 }
             }
 
-            this.lastSyncTime = new Date().toISOString();
-            this.saveData();
-            this.updateSyncStatus('synced');
+            if (!this.googleSheetsWebhook) {
+                this.updateSyncStatus('offline');
+            } else if (syncFailed) {
+                this.updateSyncStatus('error');
+            } else {
+                this.lastSyncTime = new Date().toISOString();
+                this.saveData();
+                this.updateSyncStatus('synced');
+            }
 
             console.log('Full sync completed successfully');
         } catch (error) {
@@ -2584,7 +2901,7 @@ class PomodoroTimer {
             return { success: false, reason: 'no_webhook' };
         }
 
-        const today = getTodayUTC();
+        const today = getTodayLocalISODate();
         console.log('🔄 [Stats Sync] Starting sync for:', today);
 
         try {
@@ -2808,19 +3125,20 @@ class PomodoroTimer {
 
     restorePomodoroCounter() {
         // Find the most recent work session from today
-        const today = getTodayUTC();
+        const today = getTodayLocal();
         const todaysSessions = this.workSessions.filter(s => {
-            const sessionDate = getDateUTC(s.completedAt);
+            const sessionDate = getDateLocal(s.completedAt);
             return sessionDate === today;
         });
 
         if (todaysSessions.length > 0) {
-            // Get the latest session (already sorted by completedAt descending)
-            const latestSession = todaysSessions[0];
+            // Local sessions are appended oldest-first, so sort to find the latest
+            const latestSession = [...todaysSessions].sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0];
 
             if (latestSession.pomodoroCount !== undefined) {
                 // Restore the pomodoro count from the latest session
                 this.completedPomodoros = latestSession.pomodoroCount;
+                this.consecutiveWorkSessions = this.completedPomodoros;
                 console.log(`🔄 Restored pomodoro counter to ${this.completedPomodoros} from latest work session`);
 
                 // Update progress display
@@ -2829,6 +3147,7 @@ class PomodoroTimer {
         } else {
             // No sessions today, reset counter
             this.completedPomodoros = 0;
+            this.consecutiveWorkSessions = 0;
             this.updatePomodoroProgress();
         }
     }
@@ -2894,26 +3213,15 @@ class PomodoroTimer {
             }
         }
 
-        // Remove tasks that were completed on other devices
-        const tasksToRemove = [];
+        // Absence from the server list is not a deletion signal: the server
+        // returns no tombstones, so a missing task may simply not have been
+        // uploaded yet (created offline / first sync / empty sheet). Keep
+        // local-only tasks and re-upload them instead of deleting them.
         for (const localTask of mergedTasks) {
             const serverTask = serverTasks.find(st => st.id === localTask.id);
             if (!serverTask && !this.isTaskCompleted(localTask.id)) {
-                // Task exists locally but not on server, and wasn't completed locally
-                // This means it was completed/deleted on another device
-                console.log('🗑️ Task was completed on another device:', localTask.text);
-                tasksToRemove.push(localTask.id);
-                this.addToDeletedTasks(localTask.id);
-                this.addActivity(`✅ Task completed on another device: ${localTask.text}`);
-                hasChanges = true;
-            }
-        }
-
-        // Actually remove the tasks
-        for (const taskId of tasksToRemove) {
-            const index = mergedTasks.findIndex(t => t.id === taskId);
-            if (index !== -1) {
-                mergedTasks.splice(index, 1);
+                console.log('Keeping local-only task (no server tombstone):', localTask.text);
+                hasChanges = true; // Trigger re-upload via syncAllTasksToServer
             }
         }
 
@@ -3035,14 +3343,14 @@ class PomodoroTimer {
 
     showSetupModal() {
         if (this.setupModal) {
-            this.setupModal.classList.remove('hidden');
+            this.setupModal.classList.add('active');
             document.body.style.overflow = 'hidden'; // Prevent background scrolling
         }
     }
 
     hideSetupModal() {
         if (this.setupModal) {
-            this.setupModal.classList.add('hidden');
+            this.setupModal.classList.remove('active');
             document.body.style.overflow = ''; // Restore scrolling
         }
     }
@@ -3114,7 +3422,7 @@ class PomodoroTimer {
     sendReport() {
         if (!this.userEmail) {
             alert('Please set your email in settings first!');
-            this.toggleSettings();
+            this.showSettingsModal();
             return;
         }
 
@@ -3212,11 +3520,13 @@ class PomodoroTimer {
     }
 
     updateSyncButton() {
+        // Update only the label so the header button keeps its icon
+        const label = this.syncNowBtn.querySelector('.header-action-label') || this.syncNowBtn;
         if (!this.googleSheetsWebhook) {
-            this.syncNowBtn.textContent = '⚙️ Sync Setup';
+            label.textContent = 'Sync Setup';
             this.syncNowBtn.title = 'Configure Google Sheets sync';
         } else {
-            this.syncNowBtn.textContent = '🔄 Sync Now';
+            label.textContent = 'Sync Now';
             this.syncNowBtn.title = 'Manually sync with Google Sheets';
         }
     }
@@ -3233,19 +3543,17 @@ class PomodoroTimer {
             this.statsSyncText.textContent = 'Syncing...';
         }
 
-        // Perform full sync (includes task sync + stats sync)
+        // Perform full sync (includes task sync + stats sync). Today's items
+        // are already logged when they complete, so do not re-log them here.
         await this.performFullSync();
 
-        // Also sync activity log
-        await this.syncTodayData();
-
-        // Show success message with details (using UTC for consistency)
-        const today = getTodayUTC();
+        // Show success message with details (local calendar day)
+        const today = getTodayLocal();
         const completedCount = this.completedTasks.filter(t =>
-            getDateUTC(t.completedAt) === today
+            getDateLocal(t.completedAt) === today
         ).length;
         const sessionsCount = this.workSessions.filter(s =>
-            getDateUTC(s.completedAt) === today
+            getDateLocal(s.completedAt) === today
         ).length;
 
         console.log(`✅ Manual sync completed! Today's stats: ${completedCount} tasks, ${sessionsCount} sessions`);
@@ -3267,13 +3575,13 @@ class PomodoroTimer {
 
     scheduleDailyReport() {
         const now = new Date();
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(23, 59, 0, 0);
+        const reportTime = new Date(now);
+        reportTime.setHours(23, 59, 0, 0);
+        if (reportTime <= now) reportTime.setDate(reportTime.getDate() + 1);
 
-        const timeUntilReport = tomorrow.getTime() - now.getTime();
+        const timeUntilReport = reportTime.getTime() - now.getTime();
 
-        setTimeout(() => {
+        this.dailyReportTimer = setTimeout(() => {
             if (this.userEmail) {
                 this.sendReport();
             }
@@ -3332,7 +3640,7 @@ class PomodoroTimer {
 
         // Group operations by type
         const syncTasks = operations.filter(op => op.type === 'sync_task').map(op => op.data);
-        const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => op.data);
+        const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => typeof op.data === 'string' ? op.data : op.data?.taskId).filter(Boolean);
         const syncCompletedTasks = operations.filter(op => op.type === 'sync_completed_task').map(op => op.data);
         const syncWorkSessions = operations.filter(op => op.type === 'sync_work_session').map(op => op.data);
         const syncArchivedTasks = operations.filter(op => op.type === 'sync_archived_task').map(op => op.data);
@@ -3825,15 +4133,22 @@ class AlertSoundManager {
             await this.ensureDBReady();
 
             let audioData = null;
+            let fileName = null;
             if (file) {
                 // Convert file to base64
                 audioData = await this.fileToBase64(file);
+                fileName = file.name;
+            } else {
+                // Settings-only save: preserve any existing custom file
+                await this.loadSound(type);
+                audioData = this.soundTypes[type].file || null;
+                fileName = this.soundTypes[type].fileName || null;
             }
 
             const soundConfig = {
                 type,
                 file: audioData,
-                fileName: file ? file.name : null,
+                fileName,
                 volume: parseFloat(volume),
                 duration: parseInt(duration),
                 enabled: Boolean(enabled)
@@ -4062,10 +4377,13 @@ function showToast(message, type = 'info') {
         info: 'ℹ'
     };
 
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type] || icons.info}</span>
-        <span class="toast-message">${message}</span>
-    `;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'toast-icon';
+    iconSpan.textContent = icons[type] || icons.info;
+    const messageSpan = document.createElement('span');
+    messageSpan.className = 'toast-message';
+    messageSpan.textContent = message;
+    toast.append(iconSpan, messageSpan);
 
     toastContainer.appendChild(toast);
 
@@ -4089,8 +4407,16 @@ function createToastContainer() {
 
 
 // Initialize the app when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-    window.pomodoroTimer = new PomodoroTimer();
+document.addEventListener('DOMContentLoaded', async () => {
+    // Sound manager first so the timer UI can seed from persisted sounds;
+    // the timer must still start even if IndexedDB fails.
     alertSoundManager = new AlertSoundManager();
     window.alertSoundManager = alertSoundManager; // Expose globally
+    try {
+        await Promise.all(Object.keys(alertSoundManager.soundTypes).map(t => alertSoundManager.loadSound(t)));
+    } catch (error) {
+        console.error('Failed to preload alert sounds:', error);
+    } finally {
+        window.pomodoroTimer = new PomodoroTimer();
+    }
 });

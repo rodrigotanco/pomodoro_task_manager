@@ -507,3 +507,442 @@ test('restorePomodoroCounter uses the latest session of the day', async (t) => {
     timer.restorePomodoroCounter();
     assert.strictEqual(timer.completedPomodoros, 3);
 });
+
+// ---------------------------------------------------------------------------
+// Audit bugs (GitHub issue #1). Sync tests run the real Apps Script backend
+// against an in-memory spreadsheet.
+// ---------------------------------------------------------------------------
+
+function makeServer() {
+    const sheets = {};
+    const makeSheet = () => {
+        const rows = [];
+        return {
+            rows,
+            getLastRow: () => rows.length,
+            getRange: (r, c, numRows = 1, numCols = 1) => ({
+                setValues: (values) => values.forEach((row, i) => {
+                    rows[r - 1 + i] = rows[r - 1 + i] || [];
+                    row.forEach((v, j) => { rows[r - 1 + i][c - 1 + j] = v; });
+                }),
+                getValues: () => Array.from({ length: numRows }, (_, i) =>
+                    Array.from({ length: numCols }, (_, j) => (rows[r - 1 + i] || [])[c - 1 + j] ?? '')),
+                getValue: () => (rows[r - 1] || [])[c - 1] ?? '',
+                setFontWeight() {}, setBackground() {}, setFontColor() {},
+            }),
+            deleteRow: (r) => rows.splice(r - 1, 1),
+            autoResizeColumns() {},
+        };
+    };
+    const context = {
+        console: { log() {}, error() {} },
+        SpreadsheetApp: {
+            getActiveSpreadsheet: () => ({
+                getSheetByName: (name) => sheets[name] || null,
+                insertSheet: (name) => (sheets[name] = makeSheet()),
+            }),
+        },
+        ContentService: { createTextOutput: (text) => ({ text, setMimeType() { return this; } }), MimeType: {} },
+    };
+    vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'google-apps-script.js'), 'utf8'), context);
+    const run = (body) => context.doPost({ postData: { contents: body }, parameter: {} }).text;
+    return {
+        sheets,
+        post: (data) => JSON.parse(run(JSON.stringify(data))),
+        fetch: async (url, options) => {
+            const text = run(options.body);
+            return { status: 200, ok: true, text: async () => text };
+        },
+        dataRows: (name) => Math.max(0, (sheets[name]?.rows.length ?? 0) - 1),
+    };
+}
+
+async function createSyncedApp(server, t) {
+    const app = await createApp({ pomodoroData: JSON.stringify({ tasks: [], googleSheetsWebhook: 'http://sheet.test' }) });
+    app.sandbox.fetch = server.fetch;
+    t.after(() => cleanup(app.timer));
+    return app;
+}
+
+function addTask(timer, text) {
+    timer.taskInput.value = text;
+    timer.addTask();
+    return timer.tasks.at(-1);
+}
+
+// Fast-forward a running countdown
+function elapse(timer, seconds) {
+    timer.timerEndAt -= seconds * 1000;
+    timer.startTime -= seconds * 1000;
+    timer.timeLeft = timer.getRemainingSeconds();
+}
+
+function runFullSession(timer) {
+    timer.startTimer();
+    elapse(timer, timer.timeLeft);
+    timer.completeSession();
+}
+
+const noEvent = { stopPropagation() {} };
+// Arrays made inside the vm have a different prototype, which deepStrictEqual rejects
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const activityLog = (app) => JSON.parse(app.storage.pomodoroActivities || '[]').map(a => a.text);
+
+test('bug 1: index.html has no duplicate element IDs', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
+    assert.deepStrictEqual(ids.filter((id, i) => ids.indexOf(id) !== i), []);
+});
+
+test('bug 1: saving settings without edits keeps the long break length', async (t) => {
+    const { timer, els } = await createApp({ pomodoroData: JSON.stringify({ tasks: [], longBreakDuration: 900 }) });
+    t.after(() => cleanup(timer));
+    assert.strictEqual(els.longBreakDuration.value, 15);
+    timer.saveSettings();
+    assert.strictEqual(timer.longBreakDuration, 900);
+    assert.strictEqual(els.longBreakAlertDuration.value, 5); // Alert length has its own input
+});
+
+test('bug 5: Plan during a running session shows the task list', async (t) => {
+    const { timer, query } = await createApp();
+    t.after(() => cleanup(timer));
+    timer.selectTask(addTask(timer, 'Focus').id);
+    timer.startTimer();
+    assert.ok(query('.tasks-section')._classes.has('focus-collapsed'));
+
+    timer.setViewMode('plan');
+    assert.ok(timer.isRunning);
+    assert.ok(!query('.tasks-section')._classes.has('focus-collapsed'));
+    assert.ok(!query('main')._classes.has('focus-mode'));
+
+    timer.setViewMode('timer');
+    assert.ok(query('.tasks-section')._classes.has('focus-collapsed'));
+    assert.ok(query('main')._classes.has('focus-mode'));
+});
+
+test('bug 5: deleting the running task from Plan stops its session', async (t) => {
+    const { timer } = await createApp();
+    t.after(() => cleanup(timer));
+    const task = addTask(timer, 'Focus');
+    timer.selectTask(task.id);
+    timer.startTimer();
+    elapse(timer, 600);
+    timer.setViewMode('plan');
+    timer.deleteTask(task.id, noEvent);
+    assert.strictEqual(timer.isRunning, false);
+    assert.strictEqual(timer.timeLeft, timer.workDuration);
+    assert.strictEqual(timer.workSessions.length, 0);
+});
+
+test('bug 2: long breaks still happen when a sync runs after every pomodoro', async (t) => {
+    const server = makeServer();
+    const { timer, sandbox } = await createSyncedApp(server, t);
+    sandbox.confirm = () => false;
+    timer.selectTask(addTask(timer, 'Cycle').id);
+    const counts = [];
+    let longBreaks = 0;
+    for (let i = 0; i < 8; i++) {
+        runFullSession(timer);
+        if (timer.isLongBreak) longBreaks++;
+        await timer.performFullSync();
+        counts.push(timer.completedPomodoros);
+        runFullSession(timer);
+    }
+    assert.deepStrictEqual(counts, [1, 2, 3, 0, 1, 2, 3, 0]);
+    assert.strictEqual(longBreaks, 2);
+});
+
+test('bug 6: finishing a task early gives the next task a fresh session', async (t) => {
+    const { timer, sandbox, els } = await createApp();
+    t.after(() => cleanup(timer));
+    sandbox.confirm = () => false;
+    const first = addTask(timer, 'First');
+    const second = addTask(timer, 'Second');
+    timer.selectTask(first.id);
+    timer.startTimer();
+    elapse(timer, 600);
+    timer.completeCurrentTask();
+    assert.strictEqual(timer.timeLeft, 1500);
+
+    timer.selectTask(second.id);
+    assert.strictEqual(els.startBtnLabel.textContent, 'I will work on this task');
+    runFullSession(timer);
+    assert.deepStrictEqual(plain(timer.workSessions.map(s => [s.taskText, s.duration])), [['First', 600], ['Second', 1500]]);
+});
+
+test('bug 6: switching tasks while paused credits the old task and starts fresh', async (t) => {
+    const { timer, sandbox } = await createApp();
+    t.after(() => cleanup(timer));
+    sandbox.confirm = () => false;
+    const first = addTask(timer, 'First');
+    const second = addTask(timer, 'Second');
+    timer.selectTask(first.id);
+    timer.startTimer();
+    elapse(timer, 600);
+    timer.pauseTimer();
+    timer.selectTask(second.id);
+    assert.strictEqual(timer.timeLeft, 1500);
+    assert.deepStrictEqual(plain(timer.workSessions.map(s => [s.taskText, s.duration])), [['First', 600]]);
+});
+
+test('bug 6: a session logs its own length after settings change mid-run', async (t) => {
+    const { timer, sandbox } = await createApp();
+    t.after(() => cleanup(timer));
+    sandbox.confirm = () => false;
+    timer.selectTask(addTask(timer, 'Task').id);
+    timer.startTimer();
+    timer.workDuration = 3000;
+    elapse(timer, timer.timeLeft);
+    timer.completeSession();
+    assert.strictEqual(timer.workSessions[0].duration, 1500);
+});
+
+test('completing a task from the end-of-session prompt records one session', async (t) => {
+    const { timer, sandbox } = await createApp();
+    t.after(() => cleanup(timer));
+    sandbox.confirm = () => true;
+    timer.selectTask(addTask(timer, 'Task').id);
+    runFullSession(timer);
+    assert.strictEqual(timer.workSessions.length, 1);
+    assert.strictEqual(timer.completedTasks.length, 1);
+    assert.strictEqual(timer.isWorkSession, false);
+    assert.strictEqual(timer.timeLeft, timer.breakDuration);
+});
+
+test('bug 3: a task deleted on one device leaves the other and stays gone', async (t) => {
+    const server = makeServer();
+    const A = await createSyncedApp(server, t);
+    const B = await createSyncedApp(server, t);
+    const task = addTask(A.timer, 'Shared');
+    await A.timer.syncQueue.flush();
+    await B.timer.performFullSync();
+    assert.ok(B.timer.tasks.some(x => x.id === task.id));
+
+    A.timer.deleteTask(task.id, noEvent);
+    await A.timer.syncQueue.flush();
+    await B.timer.performFullSync();
+    assert.ok(!B.timer.tasks.some(x => x.id === task.id));
+    assert.strictEqual(server.dataRows('Tasks'), 0);
+});
+
+test('bug 3: a task completed on one device leaves the other', async (t) => {
+    const server = makeServer();
+    const A = await createSyncedApp(server, t);
+    const B = await createSyncedApp(server, t);
+    const task = addTask(A.timer, 'Shared');
+    await A.timer.syncQueue.flush();
+    await B.timer.performFullSync();
+
+    A.timer.completeTask(task.id, noEvent);
+    await A.timer.syncQueue.flush();
+    await B.timer.performFullSync();
+    assert.ok(!B.timer.tasks.some(x => x.id === task.id));
+    assert.strictEqual(server.dataRows('Tasks'), 0);
+});
+
+test('bug 3: a stale client cannot upload a finished task again', async (t) => {
+    const server = makeServer();
+    const task = { id: 't', text: 'Old', version: 1, createdAt: new Date().toISOString() };
+    server.post({ action: 'sync_tasks', tasks: [task] });
+    server.post({ action: 'delete_task', taskId: 't' });
+    server.post({ action: 'sync_tasks', tasks: [task] });
+    assert.strictEqual(server.dataRows('Tasks'), 0);
+    assert.deepStrictEqual(server.post({ action: 'get_tasks' }).deletedTaskIds, ['t']);
+});
+
+test('bug 3: a session running on a task removed elsewhere can finish first', async (t) => {
+    const server = makeServer();
+    const { timer } = await createSyncedApp(server, t);
+    const task = addTask(timer, 'Shared');
+    timer.selectTask(task.id);
+    timer.startTimer();
+    timer.mergeTasks([], [task.id]);
+    assert.ok(timer.isRunning);
+    assert.ok(timer.tasks.some(x => x.id === task.id));
+
+    timer.pauseTimer();
+    timer.mergeTasks([], [task.id]);
+    assert.ok(!timer.tasks.some(x => x.id === task.id));
+    assert.strictEqual(timer.selectedTaskId, null);
+});
+
+test('bug 3: unsynced local tasks with no deletion record are still kept', async (t) => {
+    const server = makeServer();
+    const { timer } = await createSyncedApp(server, t);
+    const task = addTask(timer, 'Local only');
+    timer.syncQueue.clear();
+    await timer.performFullSync();
+    assert.ok(timer.tasks.some(x => x.id === task.id));
+    assert.strictEqual(server.dataRows('Tasks'), 1);
+});
+
+test('bug 4: work made offline reaches the server once back online', async (t) => {
+    const server = makeServer();
+    const { timer, sandbox } = await createSyncedApp(server, t);
+    sandbox.confirm = () => false;
+    const keep = addTask(timer, 'Session task');
+    const done = addTask(timer, 'Finish offline');
+    const gone = addTask(timer, 'Delete offline');
+    await timer.syncQueue.flush();
+    assert.strictEqual(server.dataRows('Tasks'), 3);
+
+    sandbox.fetch = () => Promise.reject(new TypeError('Failed to fetch'));
+    timer.syncToGoogleSheetsJSONP = async () => ({ success: false, reason: 'offline' });
+    timer.selectTask(keep.id);
+    runFullSession(timer);
+    timer.completeTask(done.id, noEvent);
+    timer.deleteTask(gone.id, noEvent);
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 3);
+    assert.strictEqual(timer.syncQueue.consecutiveFailures, 1);
+
+    sandbox.fetch = server.fetch;
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 0);
+    assert.strictEqual(timer.syncQueue.consecutiveFailures, 0);
+    assert.strictEqual(server.dataRows('Work Sessions'), 1);
+    assert.strictEqual(server.dataRows('Completed Tasks'), 1);
+    assert.strictEqual(server.dataRows('Tasks'), 1);
+});
+
+test('bug 4: a {success:false} server reply also keeps operations queued', async (t) => {
+    const server = makeServer();
+    const { timer, sandbox } = await createSyncedApp(server, t);
+    sandbox.fetch = async () => ({ status: 200, text: async () => JSON.stringify({ success: false, error: 'quota' }) });
+    timer.syncQueue.enqueue({ type: 'sync_work_session', data: { id: 's', duration: 60 } });
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 1);
+    timer.syncQueue.clear();
+});
+
+test('bug 4: retries back off and are capped at 5 minutes', async (t) => {
+    const { timer } = await createApp();
+    t.after(() => cleanup(timer));
+    const delayAfter = (failures) => {
+        timer.syncQueue.consecutiveFailures = failures;
+        return timer.syncQueue.getRetryDelay();
+    };
+    assert.deepStrictEqual([1, 2, 3, 20].map(delayAfter), [5000, 10000, 20000, 300000]);
+});
+
+test('bug 4: without a webhook the queue drains instead of retrying forever', async (t) => {
+    const { timer } = await createApp();
+    t.after(() => cleanup(timer));
+    timer.selectTask(addTask(timer, 'No sync').id);
+    timer.syncQueue.enqueue({ type: 'sync_work_session', data: { id: 's', duration: 60 } });
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 0);
+});
+
+test('bug 7: archived tasks from the server are merged locally', async (t) => {
+    const server = makeServer();
+    const { timer } = await createSyncedApp(server, t);
+    server.post({ action: 'sync_archived_tasks', archivedTasks: [{ id: 'x', text: 'Old', createdAt: 'c', archivedAt: new Date().toISOString() }] });
+    await timer.performFullSync();
+    assert.deepStrictEqual(plain(timer.archivedTasks.map(a => a.id)), ['x']);
+});
+
+test('bug 8: date filters use the client timezone', async (t) => {
+    const server = makeServer();
+    const completedAt = '2026-11-06T01:30:00.000Z'; // 20:30 on Nov 5 in New York
+    server.post({ action: 'sync_work_sessions', workSessions: [{ id: 's', taskText: 'T', duration: 1500, completedAt }] });
+    server.post({ action: 'complete_task', task: { id: 'c', text: 'T', createdAt: 'c', completedAt } });
+    const query = (action, key, date, timezoneOffset) => server.post({ action, date, timezoneOffset })[key].length;
+
+    assert.strictEqual(query('get_work_sessions', 'workSessions', '2026-11-05', 300), 1);
+    assert.strictEqual(query('get_work_sessions', 'workSessions', '2026-11-06', 300), 0);
+    assert.strictEqual(query('get_completed_tasks', 'completedTasks', '2026-11-05', 300), 1);
+    assert.strictEqual(query('get_work_sessions', 'workSessions', '2026-11-06', undefined), 1); // Older clients: UTC
+
+    const { timer, sandbox } = await createSyncedApp(server, t);
+    const bodies = [];
+    sandbox.fetch = async (url, options) => { bodies.push(JSON.parse(options.body)); return server.fetch(url, options); };
+    await timer.refreshTodayStats();
+    assert.ok(bodies.length === 2 && bodies.every(b => b.timezoneOffset === new Date().getTimezoneOffset()));
+});
+
+test('bug 9: ticking a paused task records the time worked', async (t) => {
+    const { timer } = await createApp();
+    t.after(() => cleanup(timer));
+    const task = addTask(timer, 'Paused');
+    timer.selectTask(task.id);
+    timer.startTimer();
+    elapse(timer, 600);
+    timer.pauseTimer();
+    timer.completeTask(task.id, noEvent);
+    assert.deepStrictEqual(plain(timer.workSessions.map(s => s.duration)), [600]);
+    assert.strictEqual(timer.timeLeft, timer.workDuration);
+});
+
+test('bug 10: saving settings while paused keeps the countdown', async (t) => {
+    const { timer } = await createApp();
+    t.after(() => cleanup(timer));
+    timer.selectTask(addTask(timer, 'Paused').id);
+    timer.startTimer();
+    elapse(timer, 600);
+    timer.pauseTimer();
+    timer.workDurationInput.value = '25';
+    timer.saveSettings();
+    assert.strictEqual(timer.timeLeft, 900);
+    assert.strictEqual(timer.currentDuration, 1500);
+
+    // A session that hasn't started still picks up the new length
+    timer.resetTimer();
+    timer.workDurationInput.value = '30';
+    timer.saveSettings();
+    assert.strictEqual(timer.timeLeft, 1800);
+});
+
+for (const action of ['bulkDeleteTasks', 'bulkArchiveTasks']) {
+    test(`bug 11: ${action} clears the selected task`, async (t) => {
+        const { timer, els } = await createApp();
+        t.after(() => cleanup(timer));
+        const task = addTask(timer, 'Selected');
+        timer.selectTask(task.id);
+        timer.toggleBulkSelection();
+        timer.handleTaskCheckbox(task.id, true);
+        timer[action]();
+        assert.strictEqual(timer.selectedTaskId, null);
+        assert.strictEqual(els.currentTaskName.textContent, 'No task selected');
+        assert.strictEqual(els.startBtn.disabled, true);
+    });
+}
+
+test('bug 12: sync does not round local session lengths', async (t) => {
+    const server = makeServer();
+    const { timer } = await createSyncedApp(server, t);
+    timer.selectTask(addTask(timer, 'Short').id);
+    timer.startTimer();
+    elapse(timer, 40);
+    timer.completeCurrentTask();
+    await timer.syncQueue.flush();
+    await timer.performFullSync();
+    assert.strictEqual(timer.workSessions[0].duration, 40);
+    assert.strictEqual(server.dataRows('Work Sessions'), 1);
+});
+
+test('bug 13: skipped server tasks do not flood the activity log', async (t) => {
+    const server = makeServer();
+    const app = await createSyncedApp(server, t);
+    const task = addTask(app.timer, 'Finished');
+    app.timer.addToDeletedTasks(task.id);
+    app.timer.tasks = [];
+    for (let i = 0; i < 3; i++) app.timer.mergeTasks([task]);
+    assert.strictEqual(activityLog(app).filter(x => x.startsWith('⏭️')).length, 0);
+});
+
+test('bug 14: own tasks are not reported as coming from another device', async (t) => {
+    const server = makeServer();
+    const app = await createSyncedApp(server, t);
+    const task = addTask(app.timer, 'Mine');
+    const lastModified = task.lastModified;
+    await app.timer.syncQueue.flush();
+    await app.timer.performFullSync();
+    assert.strictEqual(server.post({ action: 'get_tasks' }).tasks[0].lastModified, lastModified);
+    assert.ok(!activityLog(app).some(x => x.includes('another device')));
+
+    // Also with a backend that hasn't been redeployed yet
+    app.timer.mergeTasks([{ ...task, deviceId: app.timer.deviceId, lastModified: new Date(Date.now() + 1000).toISOString() }]);
+    assert.ok(!activityLog(app).some(x => x.includes('another device')));
+});

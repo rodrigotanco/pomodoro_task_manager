@@ -62,6 +62,7 @@ class SyncQueue {
         this.processor = processor; // Function that processes queued operations
         this.debounceMs = debounceMs;
         this.storageKey = storageKey;
+        this.consecutiveFailures = 0;
 
         // Load persisted queue from localStorage
         this.loadQueue();
@@ -100,7 +101,7 @@ class SyncQueue {
         this.scheduleProcessing();
     }
 
-    scheduleProcessing() {
+    scheduleProcessing(delayMs = this.debounceMs) {
         // Clear existing debounce timer
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
@@ -109,7 +110,7 @@ class SyncQueue {
         // Schedule processing after debounce period
         this.debounceTimer = setTimeout(() => {
             this.processQueue();
-        }, this.debounceMs);
+        }, delayMs);
     }
 
     async processQueue() {
@@ -128,9 +129,11 @@ class SyncQueue {
             await this.processor(operations);
             this.queue = this.queue.filter(op => !operations.includes(op));
             this.saveQueue();
+            this.consecutiveFailures = 0;
             console.log('SyncQueue: Batch processing completed successfully');
         } catch (error) {
             // Keep the failed operations queued (and persisted) for a later retry
+            this.consecutiveFailures++;
             this.saveQueue();
             console.error('SyncQueue: Error processing batch:', error);
         } finally {
@@ -138,13 +141,19 @@ class SyncQueue {
 
             // Process any new operations that arrived during processing
             if (this.queue.length > 0) {
-                this.scheduleProcessing();
+                this.scheduleProcessing(this.consecutiveFailures > 0 ? this.getRetryDelay() : this.debounceMs);
             }
         }
     }
 
+    // 5s, 10s, 20s... capped at 5 minutes, so an outage doesn't hammer the server
+    getRetryDelay() {
+        return Math.min(5000 * 2 ** (this.consecutiveFailures - 1), 300000);
+    }
+
     clear() {
         this.queue = [];
+        this.consecutiveFailures = 0;
         this.saveQueue(); // Persist cleared queue
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
@@ -349,7 +358,7 @@ class PomodoroTimer {
         this.longBreakSoundInput = document.getElementById('longBreakSound');
         this.longBreakSoundName = document.getElementById('longBreakSoundName');
         this.longBreakVolumeInput = document.getElementById('longBreakVolume');
-        this.longBreakDurationInput = document.getElementById('longBreakDuration');
+        this.longBreakAlertDurationInput = document.getElementById('longBreakAlertDuration');
 
         this.workStartSoundInput = document.getElementById('workStartSound');
         this.workStartSoundName = document.getElementById('workStartSoundName');
@@ -915,7 +924,7 @@ class PomodoroTimer {
 
             // Update sound settings UI for all 5 sound types
             this.updateSoundUI('short-break', this.shortBreakVolumeInput, this.shortBreakDurationInput, this.shortBreakSoundName);
-            this.updateSoundUI('long-break', this.longBreakVolumeInput, this.longBreakDurationInput, this.longBreakSoundName);
+            this.updateSoundUI('long-break', this.longBreakVolumeInput, this.longBreakAlertDurationInput, this.longBreakSoundName);
             this.updateSoundUI('work-start', this.workStartVolumeInput, this.workStartDurationInput, this.workStartSoundName);
             this.updateSoundUI('task-complete', this.taskCompleteVolumeInput, this.taskCompleteDurationInput, this.taskCompleteSoundName);
             this.updateSoundUI('daily-reset', this.dailyResetVolumeInput, this.dailyResetDurationInput, this.dailyResetSoundName);
@@ -981,8 +990,9 @@ class PomodoroTimer {
         this.notificationsEnabled = this.enableNotificationsInput.checked;
         this.googleSheetsWebhook = this.googleSheetsWebhookInput.value;
 
-        // Update current session if not running
-        if (!this.isRunning) {
+        // Update the current session only if it hasn't started; one in progress
+        // or paused keeps its length, like a running session does
+        if (!this.isRunning && this.timeLeft >= this.currentDuration) {
             if (this.isWorkSession) {
                 this.currentDuration = this.workDuration;
             } else {
@@ -1002,16 +1012,16 @@ class PomodoroTimer {
     initSoundUI() {
         const soundTypes = [
             { type: 'short-break', idPrefix: 'shortBreak' },
-            { type: 'long-break', idPrefix: 'longBreak' },
+            { type: 'long-break', idPrefix: 'longBreak', durationId: 'longBreakAlertDuration' },
             { type: 'work-start', idPrefix: 'workStart' },
             { type: 'task-complete', idPrefix: 'taskComplete' },
             { type: 'daily-reset', idPrefix: 'dailyReset' }
         ];
 
-        soundTypes.forEach(({ type, idPrefix }) => {
+        soundTypes.forEach(({ type, idPrefix, durationId }) => {
             const fileInput = document.getElementById(`${idPrefix}Sound`);
             const volumeSlider = document.getElementById(`${idPrefix}Volume`);
-            const durationInput = document.getElementById(`${idPrefix}Duration`);
+            const durationInput = document.getElementById(durationId || `${idPrefix}Duration`);
             const fileNameSpan = document.getElementById(`${idPrefix}SoundName`);
             const volumeValue = fileInput?.closest('.sound-setting-item')?.querySelector('.volume-value');
             const testBtn = document.querySelector(`.test-sound-btn[data-sound-type="${type}"]`);
@@ -1381,57 +1391,56 @@ class PomodoroTimer {
             return;
         }
 
-        // Enforce the minimum task time before recording or syncing anything
-        if (this.isRunning && (this.currentDuration - this.timeLeft) < PomodoroTimer.MIN_TASK_TIME) {
-            alert(`You need to spend at least ${PomodoroTimer.MIN_TASK_TIME} seconds on a task before completing it!`);
-            return;
-        }
-
-        // Calculate elapsed time and create work session
-        if (this.isRunning && this.startTime) {
-            const elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
-
-            const task = this.tasks.find(t => t.id === this.selectedTaskId);
-
-            // Create work session for ANY duration (no threshold)
-            const workSession = {
-                id: generateUUID(),
-                taskId: this.selectedTaskId,
-                taskText: task ? task.text : 'Unknown task',
-                duration: elapsedSeconds,  // Seconds, matching completeSession/updateStats
-                completedAt: new Date().toISOString(),
-                isLongBreak: this.isLongBreak || false,
-                pomodoroCount: this.completedPomodoros
-            };
-
-            console.log('✅ Creating work session:', workSession);
-
-            // Add to local storage
-            this.workSessions.push(workSession);
-
-            // Queue sync to Work Sessions sheet
-            this.syncQueue.enqueue({ type: 'sync_work_session', data: workSession });
-
-            // Log to Activity Log
-            this.syncToGoogleSheets('Work Session', workSession.taskText, elapsedSeconds)
-                .then(result => {
-                    if (result.success) {
-                        console.log('✅ Work session synced to Google Sheets:', workSession.taskText);
-                    }
-                });
-
-            // Update stats and save
-            this.updateStats();
-            this.saveData();
-        }
-
-        // Complete the current task
+        // completeTask enforces the minimum time, records the session, and
+        // resets the timer
         this.completeTask(this.selectedTaskId, { stopPropagation: () => {} });
+    }
 
-        // If timer is running, pause it
-        if (this.isRunning) {
-            this.pauseTimer();
+    // Seconds spent so far in the current work session (running or paused)
+    getElapsedWorkSeconds() {
+        return Math.max(0, this.currentDuration - this.getRemainingSeconds());
+    }
+
+    // Record time spent on the selected task when a session ends early
+    recordPartialWorkSession() {
+        const elapsedSeconds = this.getElapsedWorkSeconds();
+        if (!this.isWorkSession || !this.selectedTaskId || elapsedSeconds <= 0) {
+            return null;
         }
+
+        const task = this.tasks.find(t => t.id === this.selectedTaskId);
+        const workSession = {
+            id: generateUUID(),
+            taskId: this.selectedTaskId,
+            taskText: task ? task.text : 'Unknown task',
+            duration: elapsedSeconds,  // Seconds, matching completeSession/updateStats
+            completedAt: new Date().toISOString(),
+            isLongBreak: this.isLongBreak || false,
+            pomodoroCount: this.completedPomodoros
+        };
+
+        this.workSessions.push(workSession);
+        this.syncQueue.enqueue({ type: 'sync_work_session', data: workSession });
+        this.syncToGoogleSheets('Work Session', workSession.taskText, elapsedSeconds)
+            .then(result => {
+                if (result.success) {
+                    console.log('✅ Work session synced to Google Sheets:', workSession.taskText);
+                }
+            });
+
+        this.updateStats();
+        this.saveData();
+        return workSession;
+    }
+
+    // Moving to another task: credit real work to the old task, then start fresh
+    // so the new task doesn't inherit (and later double-count) the elapsed time.
+    startFreshWorkSessionForNewTask() {
+        if (this.getElapsedWorkSeconds() >= PomodoroTimer.MIN_TASK_TIME) {
+            this.recordPartialWorkSession();
+        }
+        this.currentDuration = this.workDuration;
+        this.timeLeft = this.currentDuration;
     }
 
     skipBreak() {
@@ -1690,15 +1699,20 @@ class PomodoroTimer {
             this.sessionCount++;
             const task = this.tasks.find(t => t.id === this.selectedTaskId);
 
+            // Cycle position after this pomodoro. restorePomodoroCounter reads
+            // it back on sync, so it must include this session (0 = cycle done).
+            const cycleComplete = this.longBreakInterval > 0 &&
+                                  (this.completedPomodoros + 1) >= this.longBreakInterval;
+
             // Record work session
             const workSession = {
                 id: generateUUID(),  // Use UUID instead of Date.now()
                 taskId: this.selectedTaskId,
                 taskText: task ? task.text : 'Unknown task',
-                duration: this.workDuration,
+                duration: this.currentDuration,  // The length this session really ran
                 completedAt: new Date().toISOString(),
                 isLongBreak: this.isLongBreak || false,
-                pomodoroCount: this.completedPomodoros
+                pomodoroCount: cycleComplete ? 0 : this.completedPomodoros + 1
             };
             this.workSessions.push(workSession);
 
@@ -1836,7 +1850,8 @@ class PomodoroTimer {
     }
 
     updateFocusMode() {
-        const focusMode = this.isRunning && this.isWorkSession;
+        // Plan view hides the timer, so it must keep the task list visible
+        const focusMode = this.isRunning && this.isWorkSession && this.viewMode !== 'plan';
         if (this.tasksSection) {
             this.tasksSection.classList.toggle('focus-collapsed', focusMode);
         }
@@ -1859,6 +1874,7 @@ class PomodoroTimer {
     }
 
     applyViewMode() {
+        this.updateFocusMode();
         if (this.mainElement) {
             this.mainElement.classList.toggle('planning-mode', this.viewMode === 'plan');
         }
@@ -1973,6 +1989,11 @@ class PomodoroTimer {
             return;
         }
 
+        // Paused partway through another task's session
+        if (this.isWorkSession && this.selectedTaskId && taskId !== this.selectedTaskId) {
+            this.startFreshWorkSessionForNewTask();
+        }
+
         this.selectedTaskId = taskId;
         this.renderTasks();
         this.updateDisplay();
@@ -2030,7 +2051,10 @@ class PomodoroTimer {
     // One-click start from Plan mode: select the task and begin focusing.
     startTask(taskId, event) {
         if (event) event.stopPropagation();
-        if (this.isRunning && this.isWorkSession) return; // Already focusing
+        if (this.isRunning && this.isWorkSession) {
+            this.setViewMode('timer'); // Already focusing: return to the timer
+            return;
+        }
 
         const task = this.tasks.find(t => t.id === taskId);
         if (!task) return;
@@ -2050,7 +2074,9 @@ class PomodoroTimer {
 
         // New task, or coming from a break: fresh work session.
         // Same task while paused mid-session: resume what's left.
-        if (!this.isWorkSession || !sameTask) {
+        if (this.isWorkSession && this.selectedTaskId && !sameTask) {
+            this.startFreshWorkSessionForNewTask();
+        } else if (!this.isWorkSession || !sameTask) {
             this.isWorkSession = true;
             this.isLongBreak = false;
             this.currentDuration = this.workDuration;
@@ -2067,16 +2093,22 @@ class PomodoroTimer {
     completeTask(taskId, event) {
         event.stopPropagation();
 
-        // Check minimum time requirement
-        if (this.isRunning && this.isWorkSession && this.selectedTaskId === taskId) {
-            const elapsedTime = this.currentDuration - this.timeLeft;
-            if (elapsedTime < PomodoroTimer.MIN_TASK_TIME) {
+        // Finishing the active task ends its session early, running or paused.
+        // completeSession records the full session itself, so skip it there.
+        const endsSessionEarly = this.isWorkSession && this.selectedTaskId === taskId && !this.sessionCompleting;
+
+        if (endsSessionEarly) {
+            if (this.isRunning && this.getElapsedWorkSeconds() < PomodoroTimer.MIN_TASK_TIME) {
                 alert(`You need to spend at least ${PomodoroTimer.MIN_TASK_TIME} seconds on a task before completing it!`);
                 return;
             }
 
-            // Stop the current session if task is completed early
-            this.pauseTimer();
+            this.recordPartialWorkSession();
+            if (this.isRunning) this.pauseTimer();
+
+            // The next task starts a fresh session, not this one's remainder
+            this.currentDuration = this.workDuration;
+            this.timeLeft = this.currentDuration;
         }
 
         const taskIndex = this.tasks.findIndex(t => t.id === taskId);
@@ -2116,8 +2148,11 @@ class PomodoroTimer {
                 .filter(s => s.taskId === taskId && s.completedAt > fiveMinutesAgo)
                 .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0];
 
-            // Use atomic complete_task action to prevent race condition
-            this.completeTaskAtomically(task, recentSession);
+            // Queue the atomic complete_task action so it survives being offline
+            this.syncQueue.enqueue({
+                type: 'complete_task',
+                data: { task, workSession: recentSession || null }
+            });
 
             // Clear selection if completed task was selected
             if (this.selectedTaskId === taskId) {
@@ -2128,6 +2163,7 @@ class PomodoroTimer {
             this.updateDisplay();
             this.updateStats();
             this.saveData();
+            this.saveTimerState();
             // Add activity ONCE for task completion
             this.addActivity(`✅ Completed task: ${task.text}`);
         }
@@ -2187,19 +2223,32 @@ class PomodoroTimer {
             // Track as deleted to prevent re-adding during sync
             this.addToDeletedTasks(taskId);
 
-            // Delete from server as well
-            this.deleteTaskFromServer(taskId);
+            // Delete from server as well (queued so it survives being offline)
+            this.syncQueue.enqueue({
+                type: 'delete_task',
+                data: { taskId, timestamp: Date.now() }
+            });
 
-            // Clear selection if deleted task was selected
-            if (this.selectedTaskId === taskId) {
-                this.selectedTaskId = null;
-            }
+            this.clearActiveTask(taskId);
 
             this.renderTasks();
             this.updateDisplay();
             this.saveData();
             this.addActivity(`🗑️ Deleted task: ${task.text}`);
         }
+    }
+
+    // The selected task is gone: drop the selection and stop any session on it
+    clearActiveTask(taskId) {
+        if (this.selectedTaskId !== taskId) return;
+
+        this.selectedTaskId = null;
+        if (this.isWorkSession && (this.isRunning || this.timeLeft < this.currentDuration)) {
+            this.resetTimer();
+        } else {
+            this.saveTimerState();
+        }
+        this.updateDisplay();
     }
 
     sanitizeHTML(str) {
@@ -2688,7 +2737,7 @@ class PomodoroTimer {
             const result = JSON.parse(resultText);
 
             if (result.success) {
-                return { success: true, tasks: result.tasks || [] };
+                return { success: true, tasks: result.tasks || [], deletedTaskIds: result.deletedTaskIds || [] };
             } else {
                 return { success: false, reason: result.error || 'Unknown error' };
             }
@@ -2784,7 +2833,7 @@ class PomodoroTimer {
                 delete window[callbackName];
 
                 if (response.success) {
-                    resolve({ success: true, tasks: response.tasks || [] });
+                    resolve({ success: true, tasks: response.tasks || [], deletedTaskIds: response.deletedTaskIds || [] });
                 } else {
                     resolve({ success: false, reason: response.error || 'Unknown error' });
                 }
@@ -2826,7 +2875,7 @@ class PomodoroTimer {
                 try {
                     const serverResult = await this.getTasksFromServer();
                     if (serverResult.success) {
-                        const mergeResult = this.mergeTasks(serverResult.tasks);
+                        const mergeResult = this.mergeTasks(serverResult.tasks, serverResult.deletedTaskIds);
                         if (mergeResult.hasChanges) {
                             await this.syncAllTasksToServer();
                         }
@@ -2859,8 +2908,8 @@ class PomodoroTimer {
                 try {
                     const archivedResult = await this.getArchivedTasksFromServer();
                     if (archivedResult.success) {
-                        this.mergeArchivedTasks(archivedResult.archivedTasks || []);
-                        console.log(`✅ Synced ${archivedResult.count || 0} archived tasks from server`);
+                        this.mergeArchivedTasks(archivedResult.data?.archivedTasks || []);
+                        console.log(`✅ Synced ${archivedResult.data?.count || 0} archived tasks from server`);
                     } else {
                         console.log('📦 Archived tasks sync skipped:', archivedResult.reason);
                         if (this.googleSheetsWebhook) syncFailed = true;
@@ -3004,6 +3053,7 @@ class PomodoroTimer {
         const data = {
             action: 'get_completed_tasks',
             date: date,
+            timezoneOffset: new Date().getTimezoneOffset(),
             deviceId: this.deviceId
         };
 
@@ -3018,6 +3068,7 @@ class PomodoroTimer {
         const data = {
             action: 'get_work_sessions',
             date: date,
+            timezoneOffset: new Date().getTimezoneOffset(),
             deviceId: this.deviceId
         };
 
@@ -3099,8 +3150,9 @@ class PomodoroTimer {
                 const serverCompleted = new Date(serverSession.completedAt);
                 const localCompleted = new Date(localSession.completedAt);
 
-                // If server has different data, prefer server (assumes server is source of truth)
-                if (serverDuration !== localDuration || serverCompleted.getTime() !== localCompleted.getTime()) {
+                // If server has different data, prefer server (assumes server is source of truth).
+                // The server stores whole minutes, so compare at that precision.
+                if (serverDuration !== Math.round(localDuration / 60) * 60 || serverCompleted.getTime() !== localCompleted.getTime()) {
                     const index = this.workSessions.findIndex(s => s.id === serverSession.id);
                     this.workSessions[index] = serverSession;
                     updatedCount++;
@@ -3152,9 +3204,10 @@ class PomodoroTimer {
         }
     }
 
-    mergeTasks(serverTasks) {
+    mergeTasks(serverTasks, deletedTaskIds = []) {
         let hasChanges = false;
-        const mergedTasks = [...this.tasks];
+        let mergedTasks = [...this.tasks];
+        const deletedOnServer = new Set(deletedTaskIds.map(String));
         const localTaskIds = new Set(this.tasks.map(t => t.id));
 
         console.log('Merging tasks. Server tasks:', serverTasks.length, 'Local tasks:', this.tasks.length);
@@ -3164,9 +3217,8 @@ class PomodoroTimer {
             const taskId = serverTask.id;
 
             // Check if task is completed/deleted locally
-            if (this.isTaskCompleted(taskId)) {
+            if (this.isTaskCompleted(taskId) || deletedOnServer.has(String(taskId))) {
                 console.log('⏭️ Skipping server task (already completed locally):', serverTask.text);
-                this.addActivity(`⏭️ Ignored completed task from server: ${serverTask.text}`);
                 continue;
             }
 
@@ -3189,7 +3241,7 @@ class PomodoroTimer {
                     mergedTasks[index] = { ...serverTask, version: serverVersion };
                     hasChanges = true;
                     console.log(`🔄 Updated task with server version (v${serverVersion} > v${localVersion}):`, serverTask.text);
-                    this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
+                    if (serverTask.deviceId !== this.deviceId) this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
                 } else if (serverVersion < localVersion) {
                     // Local has newer version
                     console.log(`📍 Keeping local version (v${localVersion} > v${serverVersion}):`, localTask.text);
@@ -3203,7 +3255,7 @@ class PomodoroTimer {
                         mergedTasks[index] = { ...serverTask, version: serverVersion };
                         hasChanges = true;
                         console.log('🔄 Updated task with server version (same version, newer timestamp):', serverTask.text);
-                        this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
+                        if (serverTask.deviceId !== this.deviceId) this.addActivity(`🔄 Updated task from another device: ${serverTask.text}`);
                     } else if (serverModified < localModified) {
                         console.log('📍 Keeping local version (same version, newer timestamp):', localTask.text);
                     } else {
@@ -3213,13 +3265,25 @@ class PomodoroTimer {
             }
         }
 
-        // Absence from the server list is not a deletion signal: the server
-        // returns no tombstones, so a missing task may simply not have been
-        // uploaded yet (created offline / first sync / empty sheet). Keep
-        // local-only tasks and re-upload them instead of deleting them.
+        // Finished elsewhere: the server's deletion records say so. A session
+        // running on the task here finishes first; a later sync removes it.
+        const removedElsewhere = mergedTasks.filter(t => deletedOnServer.has(String(t.id)));
+        for (const task of removedElsewhere) {
+            if (this.isRunning && this.isWorkSession && this.selectedTaskId === task.id) continue;
+
+            mergedTasks = mergedTasks.filter(t => t.id !== task.id);
+            this.addToDeletedTasks(task.id);
+            this.addActivity(`🔄 Removed task finished on another device: ${task.text}`);
+            hasChanges = true;
+        }
+
+        // Absence from the server list alone is not a deletion signal: a task
+        // with no deletion record may simply not have been uploaded yet
+        // (created offline / first sync / empty sheet). Keep local-only tasks
+        // and re-upload them instead of deleting them.
         for (const localTask of mergedTasks) {
             const serverTask = serverTasks.find(st => st.id === localTask.id);
-            if (!serverTask && !this.isTaskCompleted(localTask.id)) {
+            if (!serverTask && !this.isTaskCompleted(localTask.id) && !deletedOnServer.has(String(localTask.id))) {
                 console.log('Keeping local-only task (no server tombstone):', localTask.text);
                 hasChanges = true; // Trigger re-upload via syncAllTasksToServer
             }
@@ -3227,6 +3291,9 @@ class PomodoroTimer {
 
         if (hasChanges) {
             this.tasks = mergedTasks;
+            if (this.selectedTaskId && !mergedTasks.some(t => t.id === this.selectedTaskId)) {
+                this.clearActiveTask(this.selectedTaskId);
+            }
             this.renderTasks();
             this.updateDisplay();
             console.log('✅ Task merge completed. Final task count:', this.tasks.length);
@@ -3641,57 +3708,54 @@ class PomodoroTimer {
         // Group operations by type
         const syncTasks = operations.filter(op => op.type === 'sync_task').map(op => op.data);
         const deleteTasks = operations.filter(op => op.type === 'delete_task').map(op => typeof op.data === 'string' ? op.data : op.data?.taskId).filter(Boolean);
+        const completeTasks = operations.filter(op => op.type === 'complete_task').map(op => op.data);
         const syncCompletedTasks = operations.filter(op => op.type === 'sync_completed_task').map(op => op.data);
         const syncWorkSessions = operations.filter(op => op.type === 'sync_work_session').map(op => op.data);
         const syncArchivedTasks = operations.filter(op => op.type === 'sync_archived_task').map(op => op.data);
 
+        // Run every step even if one fails; a failure is a thrown error or a
+        // {success: false} result.
+        const failures = [];
+        const attempt = async (label, action) => {
+            try {
+                const result = await action();
+                if (result && result.success === false) failures.push(`${label}: ${result.reason}`);
+            } catch (error) {
+                console.error(`Error syncing ${label}:`, error);
+                failures.push(`${label}: ${error.message}`);
+            }
+        };
+
         // Sync all active tasks in one batch
-        if (syncTasks.length > 0) {
-            console.log(`Syncing ${syncTasks.length} active tasks...`);
-            try {
-                await this.syncAllTasksToServer();
-            } catch (error) {
-                console.error('Error syncing active tasks:', error);
-            }
+        if (syncTasks.length > 0 && this.tasks.length > 0) {
+            await attempt('active tasks', () => this.syncAllTasksToServer());
         }
 
-        // Sync completed tasks in one batch
+        for (const { task, workSession } of completeTasks) {
+            await attempt('completed task', () => this.completeTaskAtomically(task, workSession));
+        }
+
         if (syncCompletedTasks.length > 0) {
-            console.log(`Syncing ${syncCompletedTasks.length} completed tasks...`);
-            try {
-                await this.syncCompletedTasksToServer(syncCompletedTasks);
-            } catch (error) {
-                console.error('Error syncing completed tasks:', error);
-            }
+            await attempt('completed tasks', () => this.syncCompletedTasksToServer(syncCompletedTasks));
         }
 
-        // Sync work sessions in one batch
         if (syncWorkSessions.length > 0) {
-            console.log(`Syncing ${syncWorkSessions.length} work sessions...`);
-            try {
-                await this.syncWorkSessionsToServer(syncWorkSessions);
-            } catch (error) {
-                console.error('Error syncing work sessions:', error);
-            }
+            await attempt('work sessions', () => this.syncWorkSessionsToServer(syncWorkSessions));
         }
 
-        // Sync archived tasks in one batch
         if (syncArchivedTasks.length > 0) {
-            console.log(`Syncing ${syncArchivedTasks.length} archived tasks...`);
-            try {
-                await this.syncArchivedTasksToServer(syncArchivedTasks);
-            } catch (error) {
-                console.error('Error syncing archived tasks:', error);
-            }
+            await attempt('archived tasks', () => this.syncArchivedTasksToServer(syncArchivedTasks));
         }
 
-        // Delete tasks from server
         for (const taskId of deleteTasks) {
-            try {
-                await this.deleteTaskFromServer(taskId);
-            } catch (error) {
-                console.error('Error deleting task:', error);
-            }
+            await attempt('task deletion', () => this.deleteTaskFromServer(taskId));
+        }
+
+        // Throwing keeps the batch queued for retry. Resending is safe because
+        // the server ignores IDs it already has. Without a webhook there is
+        // nowhere to retry to, so the operations are dropped.
+        if (failures.length > 0 && this.googleSheetsWebhook) {
+            throw new Error(`Sync failed: ${failures.join('; ')}`);
         }
     }
 
@@ -3874,6 +3938,7 @@ class PomodoroTimer {
 
         // Remove from tasks array
         this.tasks = this.tasks.filter(t => !this.selectedTaskIds.has(t.id));
+        if (this.selectedTaskIds.has(this.selectedTaskId)) this.clearActiveTask(this.selectedTaskId);
 
         this.addActivity(`🗑️ Bulk deleted ${count} task${count > 1 ? 's' : ''}`);
         this.exitBulkSelectionMode();
@@ -3920,6 +3985,7 @@ class PomodoroTimer {
 
         // Remove from active tasks array
         this.tasks = this.tasks.filter(t => !this.selectedTaskIds.has(t.id));
+        if (this.selectedTaskIds.has(this.selectedTaskId)) this.clearActiveTask(this.selectedTaskId);
 
         this.addActivity(`📦 Bulk archived ${count} task${count > 1 ? 's' : ''}`);
         this.exitBulkSelectionMode();

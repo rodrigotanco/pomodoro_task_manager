@@ -210,6 +210,7 @@ main {
 
 /* Pomodoro Cycle Dots */
 .pomodoro-progress {
+    flex-wrap: wrap;
     display: flex;
     justify-content: center;
     gap: 8px;
@@ -418,6 +419,28 @@ main.planning-mode .task-btn.start-btn {
 .task-input:focus {
     outline: none;
     border-color: var(--primary-color);
+}
+
+.archived-section {
+    margin-top: 16px;
+    font-size: 0.9rem;
+}
+
+.archived-section summary {
+    cursor: pointer;
+}
+
+.archived-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    overflow-wrap: anywhere;
+}
+
+.archived-date {
+    flex-shrink: 0;
+    opacity: 0.7;
 }
 
 .tasks-list {

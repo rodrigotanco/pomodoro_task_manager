@@ -1,5 +1,5 @@
 // Google Apps Script code for automatic Pomodoro data sync with full task synchronization
-// Version: 3.1.0 - deletion records, timezone-aware date filters
+// Version: 3.2.0 - script lock, deletion records, timezone-aware date filters
 //
 // Instructions:
 // 1. Open your Google Sheet
@@ -61,9 +61,20 @@ function getOrCreateSheet(name, headers = []) {
   return sheet;
 }
 
-function doPost(e) {
+// Run one request at a time. Rows are found and written by position, so
+// overlapping requests could overwrite a row or delete the wrong one. A timeout
+// throws, and the client gets {success: false} and retries.
+function withScriptLock(action) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
   try {
-    const data = JSON.parse(e.postData.contents);
+    return action();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function routeAction(data) {
     const action = data.action || 'log_activity';
 
     let response = {};
@@ -111,6 +122,14 @@ function doPost(e) {
       default:
         response = { success: false, error: 'Unknown action: ' + action };
     }
+
+    return response;
+}
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const response = withScriptLock(() => routeAction(data));
 
     // Handle JSONP callback if present
     const callback = e.parameter ? e.parameter.callback : null;
@@ -528,16 +547,18 @@ function handleJSONPData(e) {
   try {
     const action = e.parameter.action || 'log_activity';
 
-    switch (action) {
-      case 'log_activity':
-        return handleJSONPActivity(e);
-      case 'get_tasks':
-        return handleJSONPGetTasks(e);
-      case 'sync_tasks':
-        return handleJSONPSyncTasks(e);
-      default:
-        return { success: false, error: 'JSONP action not supported: ' + action };
-    }
+    return withScriptLock(() => {
+      switch (action) {
+        case 'log_activity':
+          return handleJSONPActivity(e);
+        case 'get_tasks':
+          return handleJSONPGetTasks(e);
+        case 'sync_tasks':
+          return handleJSONPSyncTasks(e);
+        default:
+          return { success: false, error: 'JSONP action not supported: ' + action };
+      }
+    });
   } catch (error) {
     return {
       success: false,
@@ -610,7 +631,7 @@ function doGet(e) {
     timestamp: new Date().toISOString(),
     supportedActions: ['log_activity', 'sync_tasks', 'get_tasks', 'update_task', 'delete_task', 'complete_task', 'sync_completed_tasks', 'get_completed_tasks', 'sync_work_sessions', 'get_work_sessions', 'sync_archived_tasks', 'get_archived_tasks'],
     jsonpActions: ['log_activity', 'get_tasks', 'sync_tasks'],
-    version: '3.1.0-with-deletion-records',
+    version: '3.2.0-with-script-lock',
     schemaVersion: TASK_SCHEMA_VERSION
   };
 
@@ -943,7 +964,7 @@ function getVersion() {
   return {
     success: true,
     version: TASK_SCHEMA_VERSION,
-    versionName: '3.1.0-deletion-records',
+    versionName: '3.2.0-script-lock',
     features: [
       'UUID-based task IDs',
       'Version-based conflict resolution',

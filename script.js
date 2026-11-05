@@ -319,6 +319,9 @@ class PomodoroTimer {
         this.taskInput = document.getElementById('taskInput');
         this.addTaskBtn = document.getElementById('addTaskBtn');
         this.tasksList = document.getElementById('tasksList');
+        this.archivedSection = document.getElementById('archivedSection');
+        this.archivedCount = document.getElementById('archivedCount');
+        this.archivedList = document.getElementById('archivedList');
 
         // Stats elements
         this.todayTasksDisplay = document.getElementById('todayTasks');
@@ -1765,7 +1768,9 @@ class PomodoroTimer {
                 // Start short break
                 this.isLongBreak = false;
                 this.currentDuration = this.breakDuration;
-                this.addActivity(`✅ Short break time (${this.completedPomodoros} of ${this.longBreakInterval} pomodoros)`);
+                this.addActivity(this.longBreakInterval > 0
+                    ? `✅ Short break time (${this.completedPomodoros} of ${this.longBreakInterval} pomodoros)`
+                    : '✅ Short break time');
             }
 
             // Switch to break
@@ -1803,6 +1808,7 @@ class PomodoroTimer {
         }
 
         // Update pomodoro progress
+        this.syncPomodoroSteps();
         if (this.longBreakInterval > 0) {
             const current = this.completedPomodoros;
             const total = this.longBreakInterval;
@@ -1924,6 +1930,21 @@ class PomodoroTimer {
             this.timerActions.classList.add('hidden');
             this.completeTaskBtn.classList.add('hidden');
             this.skipBreakBtn.classList.add('hidden');
+        }
+    }
+
+    // One dot per pomodoro in the cycle; none when long breaks are disabled
+    syncPomodoroSteps() {
+        if (!this.pomodoroProgress) return;
+
+        const total = Math.max(0, this.longBreakInterval);
+        const steps = [...this.pomodoroProgress.querySelectorAll('.pomodoro-step')];
+        steps.slice(total).forEach(step => step.remove());
+        for (let i = steps.length; i < total; i++) {
+            const step = document.createElement('div');
+            step.className = 'pomodoro-step';
+            step.dataset.step = String(i + 1);
+            this.pomodoroProgress.appendChild(step);
         }
     }
 
@@ -2257,7 +2278,34 @@ class PomodoroTimer {
         return div.innerHTML;
     }
 
+    // Read-only list of archived tasks, newest first
+    renderArchivedTasks() {
+        if (!this.archivedSection) return;
+
+        this.archivedSection.classList.toggle('hidden', this.archivedTasks.length === 0);
+        this.archivedCount.textContent = this.archivedTasks.length;
+        this.archivedList.innerHTML = '';
+
+        [...this.archivedTasks]
+            .sort((a, b) => new Date(b.archivedAt) - new Date(a.archivedAt))
+            .forEach(task => {
+                const row = document.createElement('div');
+                row.className = 'archived-item';
+
+                const text = document.createElement('span');
+                text.textContent = task.text; // Safe text content
+
+                const date = document.createElement('span');
+                date.className = 'archived-date';
+                date.textContent = new Date(task.archivedAt).toLocaleDateString();
+
+                row.append(text, date);
+                this.archivedList.appendChild(row);
+            });
+    }
+
     renderTasks() {
+        this.renderArchivedTasks();
         this.tasksList.innerHTML = '';
 
         if (this.tasks.length === 0) {
@@ -2528,7 +2576,7 @@ class PomodoroTimer {
 
             // Now test POST with sample data
             const testData = {
-                date: new Date().toISOString().split('T')[0],
+                date: getTodayLocalISODate(),
                 type: 'Test',
                 description: 'Connection test from Pomodoro Timer',
                 duration: 'N/A',
@@ -2576,7 +2624,7 @@ class PomodoroTimer {
             }
 
             const data = {
-                date: new Date().toISOString().split('T')[0],
+                date: getTodayLocalISODate(),
                 type: type,
                 description: description,
                 duration: duration ? Math.round(duration / 60) : 'N/A',
@@ -3350,7 +3398,7 @@ class PomodoroTimer {
 
         const data = {
             action: 'log_activity',
-            date: new Date().toISOString().split('T')[0],
+            date: getTodayLocalISODate(),
             type: type,
             description: description,
             duration: duration ? Math.round(duration / 60) : 'N/A',
@@ -3520,8 +3568,16 @@ class PomodoroTimer {
 
         const mailtoLink = `mailto:${this.userEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(enhancedReport)}`;
 
-        window.open(mailtoLink);
-        this.addActivity('📧 Daily report sent' + (this.googleSheetsWebhook ? ' (auto-sync enabled)' : ''));
+        // This only opens the email app, and browsers can block it when no
+        // click triggered it (like the scheduled 11:59 PM report)
+        if (window.open(mailtoLink)) {
+            this.addActivity('📧 Daily report opened in your email app' + (this.googleSheetsWebhook ? ' (auto-sync enabled)' : ''));
+        } else {
+            const message = 'The browser blocked the daily report. Click Report to send it.';
+            this.addActivity(`⚠️ ${message}`);
+            showToast(message, 'warning');
+            this.showNotification('📧 Daily report blocked', message, '⚠️');
+        }
     }
 
     async debugSync() {
@@ -3836,6 +3892,7 @@ class PomodoroTimer {
             console.log(`Added ${addedCount} archived tasks from server`);
             // Persist changes to localStorage
             this.saveData();
+            this.renderArchivedTasks();
         }
     }
 
@@ -4339,11 +4396,11 @@ class AlertSoundManager {
 
         // Define default configurations for each sound type
         const defaults = {
-            'short-break': { volume: 1.0, duration: 5000 },
-            'long-break': { volume: 1.0, duration: 5000 },
-            'work-start': { volume: 1.0, duration: 5000 },
-            'task-complete': { volume: 0.8, duration: 3000 },
-            'daily-reset': { volume: 0.7, duration: 3000 }
+            'short-break': { volume: 1.0, duration: 5000, enabled: true },
+            'long-break': { volume: 1.0, duration: 5000, enabled: true },
+            'work-start': { volume: 1.0, duration: 5000, enabled: true },
+            'task-complete': { volume: 0.8, duration: 3000, enabled: true },
+            'daily-reset': { volume: 0.7, duration: 3000, enabled: false }
         };
 
         try {
@@ -4356,13 +4413,14 @@ class AlertSoundManager {
 
                 request.onsuccess = () => {
                     // Reset in-memory config to defaults
-                    const defaultConfig = defaults[type] || { volume: 1.0, duration: 5000 };
+                    const defaultConfig = defaults[type] || { volume: 1.0, duration: 5000, enabled: true };
                     this.soundTypes[type] = {
                         ...this.soundTypes[type],
                         file: null,
                         fileName: null,
                         volume: defaultConfig.volume,
-                        duration: defaultConfig.duration
+                        duration: defaultConfig.duration,
+                        enabled: defaultConfig.enabled
                     };
 
                     // Clear audio cache

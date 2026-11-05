@@ -515,6 +515,7 @@ test('restorePomodoroCounter uses the latest session of the day', async (t) => {
 
 function makeServer() {
     const sheets = {};
+    const lock = { waits: 0, releases: 0, timeout: false };
     const makeSheet = () => {
         const rows = [];
         return {
@@ -536,6 +537,15 @@ function makeServer() {
     };
     const context = {
         console: { log() {}, error() {} },
+        LockService: {
+            getScriptLock: () => ({
+                waitLock: () => {
+                    if (lock.timeout) throw new Error('Lock timeout');
+                    lock.waits++;
+                },
+                releaseLock: () => { lock.releases++; },
+            }),
+        },
         SpreadsheetApp: {
             getActiveSpreadsheet: () => ({
                 getSheetByName: (name) => sheets[name] || null,
@@ -549,6 +559,8 @@ function makeServer() {
     const run = (body) => context.doPost({ postData: { contents: body }, parameter: {} }).text;
     return {
         sheets,
+        lock,
+        get: (parameter) => JSON.parse(context.doGet({ parameter }).text),
         post: (data) => JSON.parse(run(JSON.stringify(data))),
         fetch: async (url, options) => {
             const text = run(options.body);
@@ -945,4 +957,130 @@ test('bug 14: own tasks are not reported as coming from another device', async (
     // Also with a backend that hasn't been redeployed yet
     app.timer.mergeTasks([{ ...task, deviceId: app.timer.deviceId, lastModified: new Date(Date.now() + 1000).toISOString() }]);
     assert.ok(!activityLog(app).some(x => x.includes('another device')));
+});
+
+test('follow-up: every server request holds the script lock', () => {
+    const server = makeServer();
+    server.post({ action: 'sync_tasks', tasks: [{ id: 'a', text: 'A', createdAt: 'c' }] });
+    server.post({ action: 'no_such_action' });
+    server.get({ action: 'get_tasks' });
+    assert.strictEqual(server.lock.waits, 3);
+    assert.strictEqual(server.lock.releases, 3);
+    assert.strictEqual(server.dataRows('Tasks'), 1);
+});
+
+test('follow-up: the lock is released when a request fails', () => {
+    const server = makeServer();
+    assert.strictEqual(server.post({ action: 'complete_task' }).success, false); // No task: throws
+    assert.strictEqual(server.lock.releases, 1);
+});
+
+test('follow-up: a lock timeout writes nothing and the client retries', async (t) => {
+    const server = makeServer();
+    const { timer } = await createSyncedApp(server, t);
+    server.lock.timeout = true;
+    assert.strictEqual(server.get({ action: 'get_tasks' }).success, false);
+    timer.syncQueue.enqueue({ type: 'sync_work_session', data: { id: 's', taskText: 'T', duration: 60 } });
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 1);
+    assert.strictEqual(server.dataRows('Work Sessions'), 0);
+
+    server.lock.timeout = false;
+    await timer.syncQueue.flush();
+    assert.strictEqual(timer.syncQueue.queue.length, 0);
+    assert.strictEqual(server.dataRows('Work Sessions'), 1);
+});
+
+test('follow-up: archived tasks are listed, newest first, as plain text', async (t) => {
+    const { timer, els, sandbox } = await createApp();
+    t.after(() => cleanup(timer));
+    assert.ok(els.archivedSection._classes.has('hidden'));
+
+    sandbox.confirm = () => true;
+    const task = addTask(timer, '<b>Older</b>');
+    timer.toggleBulkSelection();
+    timer.handleTaskCheckbox(task.id, true);
+    timer.bulkArchiveTasks();
+    timer.archivedTasks[0].archivedAt = '2026-01-01T12:00:00.000Z';
+    timer.mergeArchivedTasks([{ id: 'n', text: 'Newer', archivedAt: '2026-06-01T12:00:00.000Z' }]);
+
+    assert.ok(!els.archivedSection._classes.has('hidden'));
+    assert.strictEqual(els.archivedCount.textContent, 2);
+    // The stub DOM keeps earlier renders; the last two rows are the latest render
+    const rows = els.archivedList.children.slice(-2);
+    assert.strictEqual(rows[0].children[0].textContent, 'Newer');
+    assert.strictEqual(rows[1].children[0].textContent, '<b>Older</b>');
+    assert.strictEqual(rows[1].children[0].innerHTML, '');
+});
+
+test('follow-up: progress dots grow to match the long-break interval', async (t) => {
+    const { timer, els } = await createApp();
+    t.after(() => cleanup(timer));
+    const progress = els.pomodoroProgress;
+    progress.querySelectorAll = () => progress.children;
+    timer.longBreakInterval = 6;
+    timer.updateDisplay();
+    assert.strictEqual(progress.children.length, 6);
+    assert.strictEqual(progress.children[5].dataset.step, '6');
+});
+
+test('follow-up: disabled long breaks do not log "of 0 pomodoros"', async (t) => {
+    const app = await createApp();
+    t.after(() => cleanup(app.timer));
+    app.sandbox.confirm = () => false;
+    app.timer.longBreakInterval = 0;
+    app.timer.selectTask(addTask(app.timer, 'Task').id);
+    runFullSession(app.timer);
+    assert.strictEqual(app.timer.isLongBreak, false);
+    assert.ok(!activityLog(app).some(x => x.includes('of 0')));
+    assert.ok(activityLog(app).includes('✅ Short break time'));
+});
+
+test('follow-up: the activity log uses the local date', async (t) => {
+    const previousTZ = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+    t.after(() => {
+        if (previousTZ === undefined) delete process.env.TZ;
+        else process.env.TZ = previousTZ;
+    });
+    const server = makeServer();
+    const { timer, sandbox } = await createSyncedApp(server, t);
+    const fixed = Date.parse('2026-11-06T01:30:00.000Z'); // 20:30 on Nov 5 in New York
+    sandbox.Date = class extends Date {
+        constructor(...args) { if (args.length) super(...args); else super(fixed); }
+        static now() { return fixed; }
+    };
+    t.after(() => { sandbox.Date = Date; });
+    const result = await timer.syncToGoogleSheets('Task', 'Evening task');
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(server.sheets['Activity Log'].rows[1][0], '2026-11-05');
+});
+
+test('follow-up: a blocked daily report is not logged as sent', async (t) => {
+    const app = await createApp();
+    t.after(() => cleanup(app.timer));
+    app.timer.userEmail = 'someone@example.com';
+
+    app.sandbox.open = () => null;
+    app.timer.sendReport();
+    assert.ok(activityLog(app)[0].includes('blocked'));
+    assert.strictEqual(app.els.toastContainer.children.length, 1);
+
+    app.sandbox.open = () => ({});
+    app.timer.sendReport();
+    assert.ok(activityLog(app)[0].includes('opened in your email app'));
+    assert.ok(!activityLog(app).some(x => x.includes('report sent')));
+});
+
+test('follow-up: resetting the daily-reset sound turns it back off', async (t) => {
+    const { timer, sandbox } = await createApp();
+    t.after(() => cleanup(timer));
+    const manager = sandbox.window.alertSoundManager;
+    manager.soundTypes['daily-reset'].enabled = true; // As after uploading a custom sound
+    await manager.resetToDefault('daily-reset');
+    assert.strictEqual(manager.soundTypes['daily-reset'].enabled, false);
+
+    manager.soundTypes['short-break'].enabled = false;
+    await manager.resetToDefault('short-break');
+    assert.strictEqual(manager.soundTypes['short-break'].enabled, true);
 });

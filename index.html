@@ -108,6 +108,11 @@
 
                 <div id="tasksList" class="tasks-list"></div>
 
+                <details id="archivedSection" class="archived-section hidden">
+                    <summary>Archived tasks (<span id="archivedCount">0</span>)</summary>
+                    <div id="archivedList" class="archived-list"></div>
+                </details>
+
                 <!-- Bulk Select Toggle Button -->
                 <button id="bulkSelectToggle" class="bulk-select-toggle">
                     <i class="fas fa-check-square"></i> Select Tasks
@@ -235,8 +240,8 @@
                                 <span class="volume-value">100%</span>
                             </div>
                             <div class="control-item">
-                                <label for="longBreakDuration">Duration (s):</label>
-                                <input type="number" id="longBreakDuration" min="1" max="30" value="5"
+                                <label for="longBreakAlertDuration">Duration (s):</label>
+                                <input type="number" id="longBreakAlertDuration" min="1" max="30" value="5"
                                     class="duration-input">
                             </div>
                             <button class="test-sound-btn" data-sound-type="long-break">Test</button>

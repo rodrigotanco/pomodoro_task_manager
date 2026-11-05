@@ -1,5 +1,5 @@
 // Google Apps Script code for automatic Pomodoro data sync with full task synchronization
-// Version: 3.0.3 - CORS fixed
+// Version: 3.2.0 - script lock, deletion records, timezone-aware date filters
 //
 // Instructions:
 // 1. Open your Google Sheet
@@ -24,9 +24,10 @@ const COMPLETED_TASKS_SHEET_NAME = 'Completed Tasks';
 const WORK_SESSIONS_SHEET_NAME = 'Work Sessions';
 const ARCHIVED_TASKS_SHEET_NAME = 'Archived Tasks';
 const SETTINGS_SHEET_NAME = 'Settings';
+const DELETED_TASKS_SHEET_NAME = 'Deleted Tasks';
 
 // Task schema version - increment when changing task structure
-const TASK_SCHEMA_VERSION = 4; // Added long break tracking to Work Sessions
+const TASK_SCHEMA_VERSION = 5; // Added deletion records and timezone-aware date filters
 
 // Handle OPTIONS requests for CORS preflight
 function doOptions(e) {
@@ -60,9 +61,20 @@ function getOrCreateSheet(name, headers = []) {
   return sheet;
 }
 
-function doPost(e) {
+// Run one request at a time. Rows are found and written by position, so
+// overlapping requests could overwrite a row or delete the wrong one. A timeout
+// throws, and the client gets {success: false} and retries.
+function withScriptLock(action) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
   try {
-    const data = JSON.parse(e.postData.contents);
+    return action();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function routeAction(data) {
     const action = data.action || 'log_activity';
 
     let response = {};
@@ -110,6 +122,14 @@ function doPost(e) {
       default:
         response = { success: false, error: 'Unknown action: ' + action };
     }
+
+    return response;
+}
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const response = withScriptLock(() => routeAction(data));
 
     // Handle JSONP callback if present
     const callback = e.parameter ? e.parameter.callback : null;
@@ -167,6 +187,42 @@ function logActivity(data) {
   };
 }
 
+// IDs of tasks that must not return to the active list: deleted, completed, or archived
+function getDeletedTaskIds() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const ids = new Set();
+
+  [DELETED_TASKS_SHEET_NAME, COMPLETED_TASKS_SHEET_NAME, ARCHIVED_TASKS_SHEET_NAME].forEach(name => {
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat()
+      .filter(Boolean)
+      .forEach(id => ids.add(String(id)));
+  });
+
+  return Array.from(ids);
+}
+
+function recordDeletedTask(taskId, deviceId) {
+  const sheet = getOrCreateSheet(DELETED_TASKS_SHEET_NAME, ['ID', 'Deleted At', 'Device ID']);
+  if (findTaskRow(sheet, taskId) === -1) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, 3).setValues([[
+      taskId,
+      new Date().toISOString(),
+      deviceId || 'unknown'
+    ]]);
+  }
+}
+
+// True if a timestamp falls on the client's local date. timezoneOffset is the
+// client's Date.getTimezoneOffset() in minutes (0 = treat the date as UTC).
+function isOnClientDate(value, filterDate, timezoneOffset) {
+  const shifted = new Date(new Date(value).getTime() - (Number(timezoneOffset) || 0) * 60000);
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${month}-${day}` === filterDate;
+}
+
 // Task synchronization functions
 function syncTasks(data) {
   console.log('syncTasks called with data:', JSON.stringify(data));
@@ -184,9 +240,16 @@ function syncTasks(data) {
   let syncedCount = 0;
   let conflictsCount = 0;
   const conflicts = [];
+  const deletedIds = new Set(getDeletedTaskIds());
 
   for (const task of tasks) {
     console.log('Processing task for sync:', task.id, task.text);
+
+    // Another device may still hold a task that was finished elsewhere
+    if (deletedIds.has(String(task.id))) {
+      console.log('Ignoring upload of deleted task:', task.id);
+      continue;
+    }
 
     const existingRowIndex = findTaskRow(sheet, task.id);
 
@@ -200,7 +263,7 @@ function syncTasks(data) {
         task.version || 1,
         task.createdAt,
         task.completedAt || '',
-        timestamp,
+        task.lastModified || timestamp,
         deviceId,
         'synced'
       ]]);
@@ -223,7 +286,7 @@ function syncTasks(data) {
           taskVersion,
           task.createdAt,
           task.completedAt || '',
-          timestamp,
+          task.lastModified || timestamp,
           deviceId,
           'synced'
         ]]);
@@ -252,7 +315,7 @@ function syncTasks(data) {
             taskVersion,
             task.createdAt,
             task.completedAt || '',
-            timestamp,
+            task.lastModified || timestamp,
             deviceId,
             'synced'
           ]]);
@@ -285,18 +348,20 @@ function getTasks(data) {
   ]);
 
   const lastRow = sheet.getLastRow();
+  const deletedTaskIds = getDeletedTaskIds();
+  const deletedIds = new Set(deletedTaskIds);
   console.log('Tasks sheet last row:', lastRow);
 
   if (lastRow <= 1) {
     console.log('No tasks found in sheet');
-    return { success: true, tasks: [] };
+    return { success: true, tasks: [], deletedTaskIds };
   }
 
   const dataRange = sheet.getRange(2, 1, lastRow - 1, 9);
   const values = dataRange.getValues();
 
   const tasks = values
-    .filter(row => row[0]) // Filter out empty rows
+    .filter(row => row[0] && !deletedIds.has(String(row[0]))) // Skip empty rows and deleted tasks
     .map(row => ({
       id: row[0],
       text: row[1],
@@ -312,6 +377,7 @@ function getTasks(data) {
   const result = {
     success: true,
     tasks: tasks,
+    deletedTaskIds,
     count: tasks.length
   };
 
@@ -341,7 +407,7 @@ function updateTask(data) {
     task.version || 1,
     task.createdAt,
     task.completedAt || '',
-    timestamp,
+    task.lastModified || timestamp,
     deviceId,
     'synced'
   ]]);
@@ -360,6 +426,7 @@ function deleteTask(data) {
   ]);
 
   const taskId = data.taskId;
+  recordDeletedTask(taskId, data.deviceId);
   const rowIndex = findTaskRow(sheet, taskId);
 
   if (rowIndex === -1) {
@@ -480,16 +547,18 @@ function handleJSONPData(e) {
   try {
     const action = e.parameter.action || 'log_activity';
 
-    switch (action) {
-      case 'log_activity':
-        return handleJSONPActivity(e);
-      case 'get_tasks':
-        return handleJSONPGetTasks(e);
-      case 'sync_tasks':
-        return handleJSONPSyncTasks(e);
-      default:
-        return { success: false, error: 'JSONP action not supported: ' + action };
-    }
+    return withScriptLock(() => {
+      switch (action) {
+        case 'log_activity':
+          return handleJSONPActivity(e);
+        case 'get_tasks':
+          return handleJSONPGetTasks(e);
+        case 'sync_tasks':
+          return handleJSONPSyncTasks(e);
+        default:
+          return { success: false, error: 'JSONP action not supported: ' + action };
+      }
+    });
   } catch (error) {
     return {
       success: false,
@@ -562,7 +631,7 @@ function doGet(e) {
     timestamp: new Date().toISOString(),
     supportedActions: ['log_activity', 'sync_tasks', 'get_tasks', 'update_task', 'delete_task', 'complete_task', 'sync_completed_tasks', 'get_completed_tasks', 'sync_work_sessions', 'get_work_sessions', 'sync_archived_tasks', 'get_archived_tasks'],
     jsonpActions: ['log_activity', 'get_tasks', 'sync_tasks'],
-    version: '3.0.0-with-archived-sync',
+    version: '3.2.0-with-script-lock',
     schemaVersion: TASK_SCHEMA_VERSION
   };
 
@@ -634,7 +703,7 @@ function getCompletedTasks(data) {
     'ID', 'Text', 'Completed', 'Version', 'Created At', 'Completed At', 'Last Modified', 'Device ID', 'Sync Status'
   ]);
 
-  const filterDate = data.date; // Optional: filter by date (format: "YYYY-MM-DD" in UTC)
+  const filterDate = data.date; // Optional: client's local date as "YYYY-MM-DD" (see timezoneOffset)
   const lastRow = sheet.getLastRow();
 
   console.log('Completed tasks sheet last row:', lastRow);
@@ -661,13 +730,9 @@ function getCompletedTasks(data) {
       syncStatus: row[8]
     }));
 
-  // Filter by date if provided (using UTC format YYYY-MM-DD for consistency)
+  // Filter by date if provided
   if (filterDate) {
-    tasks = tasks.filter(task => {
-      const taskDate = new Date(task.completedAt);
-      const taskDateUTC = `${taskDate.getUTCFullYear()}-${String(taskDate.getUTCMonth() + 1).padStart(2, '0')}-${String(taskDate.getUTCDate()).padStart(2, '0')}`;
-      return taskDateUTC === filterDate;
-    });
+    tasks = tasks.filter(task => isOnClientDate(task.completedAt, filterDate, data.timezoneOffset));
     console.log(`Filtered to ${tasks.length} tasks for date: ${filterDate}`);
   }
 
@@ -744,7 +809,7 @@ function getWorkSessions(data) {
     'ID', 'Task ID', 'Task Text', 'Duration (min)', 'Completed At', 'Device ID', 'Sync Status', 'Is Long Break', 'Pomodoro Count'
   ]);
 
-  const filterDate = data.date; // Optional: filter by date (format: "YYYY-MM-DD" in UTC)
+  const filterDate = data.date; // Optional: client's local date as "YYYY-MM-DD" (see timezoneOffset)
   const lastRow = sheet.getLastRow();
 
   console.log('Work sessions sheet last row:', lastRow);
@@ -771,13 +836,9 @@ function getWorkSessions(data) {
       pomodoroCount: row[8] || 0
     }));
 
-  // Filter by date if provided (using UTC format YYYY-MM-DD for consistency)
+  // Filter by date if provided
   if (filterDate) {
-    sessions = sessions.filter(session => {
-      const sessionDate = new Date(session.completedAt);
-      const sessionDateUTC = `${sessionDate.getUTCFullYear()}-${String(sessionDate.getUTCMonth() + 1).padStart(2, '0')}-${String(sessionDate.getUTCDate()).padStart(2, '0')}`;
-      return sessionDateUTC === filterDate;
-    });
+    sessions = sessions.filter(session => isOnClientDate(session.completedAt, filterDate, data.timezoneOffset));
     console.log(`Filtered to ${sessions.length} sessions for date: ${filterDate}`);
   }
 
@@ -903,7 +964,7 @@ function getVersion() {
   return {
     success: true,
     version: TASK_SCHEMA_VERSION,
-    versionName: '3.0.0-stats-sync',
+    versionName: '3.2.0-script-lock',
     features: [
       'UUID-based task IDs',
       'Version-based conflict resolution',
